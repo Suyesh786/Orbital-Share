@@ -11,7 +11,9 @@ import {
   selectActiveTransferTotalBytes,
   selectBytesTransferred,
   selectCompletionSummary,
+  selectDownloadAllReceivedFiles,
   selectEstimatedTimeRemaining,
+  selectReceivedFileCount,
   selectExitTransferToDiscovery,
   selectHasActiveTransferSession,
   selectHasCompletionSummary,
@@ -68,6 +70,8 @@ export function TransferPage() {
   const hasActiveSession = useTransferStore(selectHasActiveTransferSession)
   const transferSessionStatus = useTransferStore(selectTransferSessionStatus)
   const resetTransferFlow = useTransferStore(selectResetTransferFlow)
+  const downloadAllReceivedFiles = useTransferStore(selectDownloadAllReceivedFiles)
+  const receivedFileCount = useTransferStore(selectReceivedFileCount)
   const startOutgoingFileTransfer = useTransferStore(selectStartOutgoingFileTransfer)
   const transferState = useTransferStore(selectTransferState)
   const progress = useTransferStore(selectTransferProgress)
@@ -147,6 +151,13 @@ export function TransferPage() {
   const summaryFileCount = completionSummary?.fileCount ?? 0
   const summaryFileNames = completionSummary?.fileNames ?? []
   const summaryPeerUsername = completionSummary?.peerUsername
+
+  const handleDownloadAll = () => {
+    downloadAllReceivedFiles()
+  }
+
+  const canDownloadReceived =
+    summaryMode === "receiver" && receivedFileCount > 0
 
   return (
     <div className="flex h-full flex-col items-center justify-center px-6">
@@ -291,18 +302,15 @@ export function TransferPage() {
               {summaryMode === "receiver" ? (
                 <>
                   <GlowButton
-                    disabled
-                    className="w-full opacity-90"
-                    onClick={() => undefined}
+                    disabled={!canDownloadReceived}
+                    className="w-full"
+                    onClick={handleDownloadAll}
                   >
                     <span className="flex items-center justify-center gap-2">
                       <Download className="size-4" />
                       Download All Files
                     </span>
                   </GlowButton>
-                  <p className="text-[11px] text-white/35">
-                    Available in Phase 3.2
-                  </p>
                   <button
                     type="button"
                     onClick={handleExit}

@@ -63,7 +63,7 @@ export interface IncomingFileChunkState {
   completed: boolean
 }
 
-/** Reconstructed in-memory file (receiver, Phase 3.1 — no download) */
+/** Reconstructed in-memory file (receiver — downloadable via Phase 3.2) */
 export interface ReceivedFileMemory {
   fileId: string
   name: string

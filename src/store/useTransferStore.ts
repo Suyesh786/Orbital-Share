@@ -3,6 +3,7 @@ import { computeTotalTransferSize } from "@/store/transferUtils"
 import { websocketService } from "@/services/websocket"
 import { mapReceiversToNearbyDevices } from "@/utils/discovery"
 import type { ReceiverDiscoveryEntry } from "@/types/websocket"
+import { downloadAllReceivedFiles as triggerDownloadAllReceivedFiles } from "@/lib/downloadReceivedFiles"
 import {
   decodeFileChunk,
   getChunkCountForFileSize,
@@ -159,6 +160,7 @@ interface TransferStoreState {
   applyTransferMetadata: (payload: TransferMetadataPayload) => void
   applyFileChunk: (chunk: ReturnType<typeof decodeFileChunk>) => void
   reconstructReceivedFiles: () => void
+  downloadAllReceivedFiles: () => number
   resetDiscovery: () => void
   resetTransferProgress: () => void
   exitTransferToDiscovery: () => void
@@ -210,6 +212,7 @@ function buildCompletionSnapshot(state: {
   mode: AppMode
   selectedFiles: SelectedFile[]
   incomingFilesMetadata: TransferFileMetadata[]
+  receivedFilesMemory: Record<string, ReceivedFileMemory>
   activeTransferPeer: TransferPeer | null
   selectedReceiver: NearbyDevice | null
 }): CompletionSummary {
@@ -224,6 +227,17 @@ function buildCompletionSnapshot(state: {
       fileNames: activeFiles.map((entry) => entry.file.name),
       peerUsername:
         state.activeTransferPeer?.username ?? state.selectedReceiver?.username,
+    }
+  }
+
+  const reconstructed = Object.values(state.receivedFilesMemory)
+  if (reconstructed.length > 0) {
+    return {
+      mode: "receiver",
+      fileCount: reconstructed.length,
+      totalBytes: reconstructed.reduce((sum, file) => sum + file.size, 0),
+      fileNames: reconstructed.map((file) => file.name),
+      peerUsername: state.activeTransferPeer?.username,
     }
   }
 
@@ -779,6 +793,7 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
 
     set({
       receivedFilesMemory,
+      incomingFileChunks: {},
       transferProgress: 100,
       bytesTransferred: state.activeTransferTotalBytes,
       transferSpeed: 0,
@@ -786,6 +801,10 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
     })
 
     get().notifyTransferComplete()
+  },
+
+  downloadAllReceivedFiles: () => {
+    return triggerDownloadAllReceivedFiles(get().receivedFilesMemory)
   },
 
   startOutgoingFileTransfer: async () => {
@@ -1423,6 +1442,8 @@ export const selectStartOutgoingFileTransfer = (state: TransferStoreState) =>
   state.startOutgoingFileTransfer
 export const selectReceivedFileCount = (state: TransferStoreState) =>
   Object.keys(state.receivedFilesMemory).length
+export const selectDownloadAllReceivedFiles = (state: TransferStoreState) =>
+  state.downloadAllReceivedFiles
 export const selectConnectWebSocket = (state: TransferStoreState) =>
   state.connectWebSocket
 export const selectDisconnectWebSocket = (state: TransferStoreState) =>

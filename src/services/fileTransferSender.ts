@@ -20,6 +20,17 @@ function yieldToMain(): Promise<void> {
   })
 }
 
+async function readFileChunk(file: File, chunkIndex: number): Promise<Uint8Array> {
+  const start = chunkIndex * TRANSFER_CHUNK_SIZE
+  const end = Math.min(start + TRANSFER_CHUNK_SIZE, file.size)
+  if (end <= start) {
+    return new Uint8Array(0)
+  }
+  const slice = file.slice(start, end)
+  const buffer = await slice.arrayBuffer()
+  return new Uint8Array(buffer)
+}
+
 export async function streamOutgoingFiles(
   transferId: string,
   files: OutgoingTransferFile[],
@@ -29,15 +40,10 @@ export async function streamOutgoingFiles(
   let bytesSent = 0
 
   for (const entry of files) {
-    const buffer = await entry.file.arrayBuffer()
-    const bytes = new Uint8Array(buffer)
     const totalChunks = getChunkCountForFileSize(entry.size)
 
     for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
-      const start = chunkIndex * TRANSFER_CHUNK_SIZE
-      const end = Math.min(start + TRANSFER_CHUNK_SIZE, bytes.byteLength)
-      const chunkData =
-        end > start ? bytes.subarray(start, end) : new Uint8Array(0)
+      const chunkData = await readFileChunk(entry.file, chunkIndex)
 
       const packet = encodeFileChunk(
         {
