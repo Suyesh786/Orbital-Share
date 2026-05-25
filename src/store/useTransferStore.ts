@@ -3,12 +3,27 @@ import { computeTotalTransferSize } from "@/store/transferUtils"
 import { websocketService } from "@/services/websocket"
 import { mapReceiversToNearbyDevices } from "@/utils/discovery"
 import type { ReceiverDiscoveryEntry } from "@/types/websocket"
+import {
+  decodeFileChunk,
+  getChunkCountForFileSize,
+} from "@/lib/transferBinaryProtocol"
+import {
+  computeTransferMetrics,
+  resetProgressMetricsSample,
+} from "@/lib/transferProgressMetrics"
+import {
+  buildOutgoingTransferFiles,
+  streamOutgoingFiles,
+  toMetadataEntries,
+} from "@/services/fileTransferSender"
 import type {
   AppMode,
   ConnectionStatus,
+  IncomingFileChunkState,
   IncomingTransferRequest,
   NearbyDevice,
   PendingOutgoingRequest,
+  ReceivedFileMemory,
   RegistrationMode,
   SelectedFile,
   TransferFileMetadata,
@@ -16,6 +31,7 @@ import type {
   TransferSessionStatus,
   TransferState,
   WebSocketConnectionStatus,
+  CompletionSummary,
 } from "@/types/device"
 import type {
   TransferRequestAcceptedPayload,
@@ -23,6 +39,7 @@ import type {
   TransferSessionClosedPayload,
   TransferSessionCompletedPayload,
   TransferSessionFailedPayload,
+  TransferMetadataPayload,
 } from "@/types/websocket"
 import { getActiveSelectedFiles } from "@/store/transferUtils"
 import {
@@ -57,6 +74,10 @@ interface TransferStoreState {
   transferProgress: number
   transferSpeed: number
   estimatedTimeRemaining: number
+  bytesTransferred: number
+  activeTransferTotalBytes: number
+  incomingFileChunks: Record<string, IncomingFileChunkState>
+  receivedFilesMemory: Record<string, ReceivedFileMemory>
 
   // Transfer requests (Phase 2.4)
   incomingTransferRequest: IncomingTransferRequest | null
@@ -69,6 +90,9 @@ interface TransferStoreState {
   activeTransferId: string
   transferSessionStatus: TransferSessionStatus | null
   transferStartedAt: number | null
+
+  // Completion snapshot (immutable — survives session cleanup)
+  completionSummary: CompletionSummary | null
 
   // Connection (transfer / discovery session)
   connectionStatus: ConnectionStatus
@@ -126,17 +150,21 @@ interface TransferStoreState {
   applyTransferSessionFailed: (payload: TransferSessionFailedPayload) => void
   applyTransferSessionCompleted: (payload: TransferSessionCompletedPayload) => void
   notifyTransferComplete: () => void
+  setCompletionSummary: (summary: CompletionSummary | null) => void
+  clearCompletionSummary: () => void
   finalizeLocalTransferSession: () => void
   completeTransferAndExit: () => void
   exitActiveTransferSession: () => void
-  beginMockTransfer: () => void
-  tickMockTransfer: () => void
-  completeMockTransfer: () => void
+  startOutgoingFileTransfer: () => Promise<void>
+  applyTransferMetadata: (payload: TransferMetadataPayload) => void
+  applyFileChunk: (chunk: ReturnType<typeof decodeFileChunk>) => void
+  reconstructReceivedFiles: () => void
   resetDiscovery: () => void
   resetTransferProgress: () => void
   exitTransferToDiscovery: () => void
   exitReceiverMode: () => void
   resetTransferSession: () => void
+  resetTransferFlow: () => void
 }
 
 const initialTransferSession = {
@@ -150,6 +178,10 @@ const initialTransferSession = {
   transferProgress: 0,
   transferSpeed: 0,
   estimatedTimeRemaining: 0,
+  bytesTransferred: 0,
+  activeTransferTotalBytes: 0,
+  incomingFileChunks: {} as Record<string, IncomingFileChunkState>,
+  receivedFilesMemory: {} as Record<string, ReceivedFileMemory>,
   incomingTransferRequest: null as IncomingTransferRequest | null,
   pendingOutgoingRequest: null as PendingOutgoingRequest | null,
   transferRejectionMessage: null as string | null,
@@ -158,6 +190,7 @@ const initialTransferSession = {
   activeTransferId: "",
   transferSessionStatus: null as TransferSessionStatus | null,
   transferStartedAt: null as number | null,
+  completionSummary: null as CompletionSummary | null,
   connectionStatus: "offline" as ConnectionStatus,
 }
 
@@ -171,6 +204,37 @@ function buildOutgoingFileMetadata(files: SelectedFile[]): TransferFileMetadata[
     size: entry.file.size,
     type: entry.file.type || "application/octet-stream",
   }))
+}
+
+function buildCompletionSnapshot(state: {
+  mode: AppMode
+  selectedFiles: SelectedFile[]
+  incomingFilesMetadata: TransferFileMetadata[]
+  activeTransferPeer: TransferPeer | null
+  selectedReceiver: NearbyDevice | null
+}): CompletionSummary {
+  const isSender = state.mode === "sender"
+
+  if (isSender) {
+    const activeFiles = getActiveSelectedFiles(state.selectedFiles)
+    return {
+      mode: "sender",
+      fileCount: activeFiles.length,
+      totalBytes: activeFiles.reduce((sum, entry) => sum + entry.file.size, 0),
+      fileNames: activeFiles.map((entry) => entry.file.name),
+      peerUsername:
+        state.activeTransferPeer?.username ?? state.selectedReceiver?.username,
+    }
+  }
+
+  const files = state.incomingFilesMetadata
+  return {
+    mode: "receiver",
+    fileCount: files.length,
+    totalBytes: files.reduce((sum, file) => sum + file.size, 0),
+    fileNames: files.map((file) => file.name),
+    peerUsername: state.activeTransferPeer?.username,
+  }
 }
 
 function clearRejectionTimer() {
@@ -196,8 +260,36 @@ const SESSION_CLEAR_FIELDS = {
   incomingFilesMetadata: [] as TransferFileMetadata[],
 } as const
 
-function toRegistrationMode(mode: AppMode): RegistrationMode {
-  return mode === "receiver" ? "receiver" : "sender"
+/** Full transfer-prep reset — preserves identity + WebSocket connection */
+const TRANSFER_FLOW_RESET_FIELDS = {
+  mode: "idle" as AppMode,
+  discoverable: false,
+  nearbyDevices: [] as NearbyDevice[],
+  selectedReceiver: null as NearbyDevice | null,
+  selectedFiles: [] as SelectedFile[],
+  totalTransferSize: 0,
+  transferState: "idle" as TransferState,
+  transferProgress: 0,
+  transferSpeed: 0,
+  estimatedTimeRemaining: 0,
+  bytesTransferred: 0,
+  activeTransferTotalBytes: 0,
+  incomingFileChunks: {} as Record<string, IncomingFileChunkState>,
+  receivedFilesMemory: {} as Record<string, ReceivedFileMemory>,
+  incomingTransferRequest: null as IncomingTransferRequest | null,
+  pendingOutgoingRequest: null as PendingOutgoingRequest | null,
+  transferRejectionMessage: null as string | null,
+  completionSummary: null as CompletionSummary | null,
+  connectionStatus: "offline" as ConnectionStatus,
+  ...SESSION_CLEAR_FIELDS,
+} as const
+
+let outgoingTransferInFlight = false
+
+function toRegistrationMode(mode: AppMode): RegistrationMode | null {
+  if (mode === "receiver") return "receiver"
+  if (mode === "sender") return "sender"
+  return null
 }
 
 export const useTransferStore = create<TransferStoreState>((set, get) => ({
@@ -258,6 +350,7 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
 
   startSendFlow: () => {
     clearRejectionTimer()
+    console.log("[MODE] startSendFlow() → sender")
     set({
       mode: "sender",
       transferState: "idle",
@@ -265,15 +358,26 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
       discoverable: false,
       selectedReceiver: null,
       nearbyDevices: [],
+      selectedFiles: [],
+      totalTransferSize: 0,
       incomingTransferRequest: null,
       pendingOutgoingRequest: null,
       transferRejectionMessage: null,
+      completionSummary: null,
+      transferProgress: 0,
+      transferSpeed: 0,
+      estimatedTimeRemaining: 0,
+      bytesTransferred: 0,
+      activeTransferTotalBytes: 0,
+      incomingFileChunks: {},
+      receivedFilesMemory: {},
       ...SESSION_CLEAR_FIELDS,
     })
     get().registerDevice()
   },
 
   startReceiveFlow: () => {
+    console.log("[MODE] startReceiveFlow() → receiver")
     set({
       mode: "receiver",
       discoverable: true,
@@ -409,6 +513,12 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
     const incoming = state.incomingTransferRequest
     if (!incoming || state.mode !== "receiver") return
 
+    set({
+      transferState: "connecting",
+      connectionStatus: "connected",
+      lastWsEvent: "transfer_accept",
+    })
+
     websocketService.sendTransferAccept({
       requesterSocketId: incoming.requesterSocketId,
     })
@@ -448,11 +558,15 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
     if (!isSender && !isReceiver) return
 
     if (isSender) {
-      if (!state.pendingOutgoingRequest) return
-    } else {
+      const canAccept =
+        Boolean(state.pendingOutgoingRequest) ||
+        (state.transferState === "requesting" &&
+          state.selectedReceiver !== null)
+      if (!canAccept) return
+    } else if (isReceiver) {
       const incoming = state.incomingTransferRequest
       if (
-        !incoming ||
+        incoming &&
         incoming.requesterSocketId !== payload.senderSocketId
       ) {
         return
@@ -481,6 +595,10 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
       transferStartedAt: Date.now(),
       activeTransferPeer: peer,
       incomingFilesMetadata: isReceiver ? payload.files : state.incomingFilesMetadata,
+      activeTransferTotalBytes: payload.totalBytes,
+      bytesTransferred: 0,
+      incomingFileChunks: {},
+      receivedFilesMemory: {},
       transferRejectionMessage: null,
       lastWsEvent: "transfer_request_accepted",
     })
@@ -511,9 +629,14 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
   },
 
   notifyTransferComplete: () => {
-    const { activeTransferId, wsConnectionStatus, transferSessionStatus } = get()
+    const { activeTransferId, wsConnectionStatus, transferSessionStatus, mode } =
+      get()
+    if (mode !== "receiver") return
     if (!activeTransferId || wsConnectionStatus !== "connected") return
-    if (transferSessionStatus !== "transferring" && transferSessionStatus !== "completed") {
+    if (
+      transferSessionStatus !== "reconstructing" &&
+      transferSessionStatus !== "transferring"
+    ) {
       return
     }
     if (transferCompleteSentForId === activeTransferId) return
@@ -528,13 +651,219 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
     }
   },
 
+  applyTransferMetadata: (payload) => {
+    const state = get()
+    if (payload.transferId !== state.activeTransferId) return
+    if (state.mode !== "receiver") return
+
+    resetProgressMetricsSample()
+
+    const incomingFileChunks: Record<string, IncomingFileChunkState> = {}
+    const incomingFilesMetadata: TransferFileMetadata[] = []
+
+    for (const file of payload.files) {
+      const totalChunks = getChunkCountForFileSize(file.size)
+      incomingFileChunks[file.fileId] = {
+        metadata: {
+          fileId: file.fileId,
+          name: file.name,
+          size: file.size,
+          type: file.type,
+        },
+        chunks: Array.from({ length: totalChunks }, () => null),
+        receivedBytes: 0,
+        totalChunks,
+        completed: false,
+      }
+      incomingFilesMetadata.push({
+        fileId: file.fileId,
+        name: file.name,
+        size: file.size,
+        type: file.type,
+      })
+    }
+
+    set({
+      incomingFilesMetadata,
+      incomingFileChunks,
+      activeTransferTotalBytes: payload.totalBytes,
+      bytesTransferred: 0,
+      transferProgress: 0,
+      transferSpeed: 0,
+      estimatedTimeRemaining: 0,
+      transferSessionStatus: "transferring",
+      transferState: "transferring",
+      lastWsEvent: "transfer_metadata",
+    })
+  },
+
+  applyFileChunk: (chunk) => {
+    if (!chunk) return
+
+    const state = get()
+    if (chunk.transferId !== state.activeTransferId || state.mode !== "receiver") {
+      return
+    }
+
+    const existing = state.incomingFileChunks[chunk.fileId]
+    if (!existing || existing.chunks[chunk.chunkIndex]) return
+
+    const newChunks = [...existing.chunks]
+    newChunks[chunk.chunkIndex] = chunk.data
+
+    const receivedBytes = newChunks.reduce(
+      (sum, part) => sum + (part?.byteLength ?? 0),
+      0
+    )
+    const fileComplete =
+      newChunks.filter((part) => part !== null).length === existing.totalChunks
+
+    const incomingFileChunks = {
+      ...state.incomingFileChunks,
+      [chunk.fileId]: {
+        ...existing,
+        chunks: newChunks,
+        receivedBytes,
+        completed: fileComplete,
+      },
+    }
+
+    const bytesTransferred = Object.values(incomingFileChunks).reduce(
+      (sum, entry) => sum + entry.receivedBytes,
+      0
+    )
+    const totalBytes = state.activeTransferTotalBytes
+    const metrics = computeTransferMetrics(bytesTransferred, totalBytes)
+
+    set({
+      incomingFileChunks,
+      bytesTransferred,
+      transferProgress: metrics.progress,
+      transferSpeed: metrics.speed,
+      estimatedTimeRemaining: metrics.estimatedTimeRemaining,
+      transferState: "transferring",
+      transferSessionStatus: "transferring",
+    })
+
+    if (Object.values(incomingFileChunks).every((entry) => entry.completed)) {
+      get().reconstructReceivedFiles()
+    }
+  },
+
+  reconstructReceivedFiles: () => {
+    const state = get()
+    if (state.mode !== "receiver") return
+
+    set({
+      transferSessionStatus: "reconstructing",
+      transferState: "transferring",
+    })
+
+    const receivedFilesMemory: Record<string, ReceivedFileMemory> = {}
+
+    for (const [fileId, entry] of Object.entries(state.incomingFileChunks)) {
+      const parts = entry.chunks.filter((part): part is Uint8Array => part !== null)
+      const blob = new Blob(parts as BlobPart[], {
+        type: entry.metadata.type || "application/octet-stream",
+      })
+      receivedFilesMemory[fileId] = {
+        fileId,
+        name: entry.metadata.name,
+        size: entry.metadata.size,
+        type: entry.metadata.type,
+        receivedBytes: entry.receivedBytes,
+        completed: true,
+        blob,
+      }
+    }
+
+    set({
+      receivedFilesMemory,
+      transferProgress: 100,
+      bytesTransferred: state.activeTransferTotalBytes,
+      transferSpeed: 0,
+      estimatedTimeRemaining: 0,
+    })
+
+    get().notifyTransferComplete()
+  },
+
+  startOutgoingFileTransfer: async () => {
+    const state = get()
+    if (state.mode !== "sender" || !state.activeTransferId) return
+    if (state.transferSessionStatus !== "connecting" || outgoingTransferInFlight) {
+      return
+    }
+
+    const activeFiles = getActiveSelectedFiles(state.selectedFiles)
+    if (activeFiles.length === 0) return
+
+    outgoingTransferInFlight = true
+    resetProgressMetricsSample()
+
+    const outgoing = buildOutgoingTransferFiles(activeFiles.map((entry) => entry.file))
+    const totalBytes = outgoing.reduce((sum, entry) => sum + entry.size, 0)
+
+    set({
+      transferSessionStatus: "metadata",
+      transferState: "transferring",
+      activeTransferTotalBytes: totalBytes,
+      bytesTransferred: 0,
+      transferProgress: 0,
+      transferSpeed: 0,
+      estimatedTimeRemaining: 0,
+    })
+
+    const metadataSent = websocketService.sendTransferMetadata({
+      transferId: state.activeTransferId,
+      files: toMetadataEntries(outgoing),
+      totalBytes,
+    })
+
+    if (!metadataSent) {
+      outgoingTransferInFlight = false
+      return
+    }
+
+    set({
+      transferSessionStatus: "transferring",
+      lastWsEvent: "transfer_metadata",
+    })
+
+    await streamOutgoingFiles(
+      state.activeTransferId,
+      outgoing,
+      (bytesSent, total) => {
+        const metrics = computeTransferMetrics(bytesSent, total)
+        set({
+          bytesTransferred: bytesSent,
+          activeTransferTotalBytes: total,
+          transferProgress: metrics.progress,
+          transferSpeed: metrics.speed,
+          estimatedTimeRemaining: metrics.estimatedTimeRemaining,
+          transferState: "transferring",
+          transferSessionStatus: "transferring",
+        })
+      }
+    )
+
+    outgoingTransferInFlight = false
+  },
+
+  setCompletionSummary: (summary) => set({ completionSummary: summary }),
+
+  clearCompletionSummary: () => set({ completionSummary: null }),
+
   finalizeLocalTransferSession: () => {
     const state = get()
     const isSender = state.mode === "sender"
+    const completionSummary = buildCompletionSnapshot(state)
 
     transferCompleteSentForId = ""
 
     set({
+      completionSummary,
+      incomingFileChunks: {},
       ...SESSION_CLEAR_FIELDS,
       incomingTransferRequest: null,
       pendingOutgoingRequest: null,
@@ -560,27 +889,24 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
     set({ lastWsEvent: "transfer_session_completed" })
   },
 
-  completeTransferAndExit: () => {
-    const isSender = get().mode === "sender"
+  resetTransferFlow: () => {
+    const previousMode = get().mode
+    clearRejectionTimer()
     transferCompleteSentForId = ""
-
-    set({
-      ...SESSION_CLEAR_FIELDS,
-      incomingTransferRequest: null,
-      pendingOutgoingRequest: null,
-      transferRejectionMessage: null,
-      transferProgress: 0,
-      transferSpeed: 0,
-      estimatedTimeRemaining: 0,
-      transferState: isSender ? "discovering" : "waiting",
-      connectionStatus: "searching",
-      selectedReceiver: isSender ? null : get().selectedReceiver,
-      discoverable: isSender ? get().discoverable : true,
+    outgoingTransferInFlight = false
+    resetProgressMetricsSample()
+    console.log("[RESET] resetTransferFlow()", {
+      previousMode,
+      nextMode: "idle",
     })
+    set({
+      ...TRANSFER_FLOW_RESET_FIELDS,
+      registeredMode: "none",
+    })
+  },
 
-    if (isSender) {
-      get().discoverReceivers()
-    }
+  completeTransferAndExit: () => {
+    get().resetTransferFlow()
   },
 
   exitActiveTransferSession: () => {
@@ -590,6 +916,7 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
     transferCompleteSentForId = ""
     clearRejectionTimer()
     set({
+      completionSummary: null,
       ...SESSION_CLEAR_FIELDS,
       incomingTransferRequest: null,
       pendingOutgoingRequest: null,
@@ -686,6 +1013,11 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
         }
       },
       onConnected: (socketId) => {
+        const mode = get().mode
+        console.log("[WS] onConnected — registerDevice()", {
+          socketId: socketId.slice(0, 8),
+          mode,
+        })
         set({ wsSocketId: socketId })
         get().registerDevice()
       },
@@ -714,9 +1046,23 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
       },
       onIncomingTransferRequest: (payload) => {
         const state = get()
-        if (state.mode !== "receiver" || state.transferState !== "waiting") {
+        if (state.mode !== "receiver") return
+
+        if (state.activeTransferId) {
+          websocketService.sendTransferReject({
+            requesterSocketId: payload.requesterSocketId,
+          })
           return
         }
+
+        if (state.transferState !== "waiting") {
+          set({
+            transferState: "waiting",
+            connectionStatus: "searching",
+            completionSummary: null,
+          })
+        }
+
         if (state.incomingTransferRequest) {
           websocketService.sendTransferReject({
             requesterSocketId: payload.requesterSocketId,
@@ -763,6 +1109,12 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
       onTransferSessionCompleted: (payload) => {
         get().applyTransferSessionCompleted(payload)
       },
+      onTransferMetadata: (payload) => {
+        get().applyTransferMetadata(payload)
+      },
+      onBinaryMessage: (data) => {
+        get().applyFileChunk(decodeFileChunk(data))
+      },
     })
 
     const current = websocketService.getStatus()
@@ -787,13 +1139,29 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
   registerDevice: () => {
     const state = get()
     if (!state.onboardingCompleted || !state.username || !state.deviceId) {
+      console.log("[REGISTER] registerDevice() skipped — identity not ready")
       return
     }
     if (state.wsConnectionStatus !== "connected") {
+      console.log("[REGISTER] registerDevice() skipped — ws offline", {
+        mode: state.mode,
+      })
       return
     }
 
     const registrationMode = toRegistrationMode(state.mode)
+    if (!registrationMode) {
+      console.log("[REGISTER] registerDevice() skipped — mode idle")
+      set({ registeredMode: "none" })
+      return
+    }
+
+    console.log("[REGISTER] registerDevice()", {
+      mode: state.mode,
+      registrationMode,
+      socketId: state.wsSocketId.slice(0, 8),
+    })
+
     const sent = websocketService.sendRegisterMessage({
       username: state.username,
       deviceId: state.deviceId,
@@ -856,54 +1224,6 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
         estimatedTimeRemaining: metrics.estimatedTimeRemaining,
       }),
     }),
-
-  beginMockTransfer: () => {
-    if (!get().activeTransferId) return
-
-    set({
-      transferState: "transferring",
-      transferSessionStatus: "transferring",
-      transferProgress: 0,
-      transferSpeed: 12_500_000,
-      estimatedTimeRemaining: 0,
-    })
-  },
-
-  tickMockTransfer: () => {
-    const { transferProgress, transferSpeed, totalTransferSize } = get()
-    if (transferProgress >= 100) return
-
-    const step =
-      transferProgress < 70 ? 2.5 : transferProgress < 90 ? 1.2 : 0.4
-    const next = Math.min(100, transferProgress + step)
-    const transferred = Math.floor((next / 100) * totalTransferSize)
-    const estimatedTimeRemaining =
-      next > 0 && next < 100
-        ? ((100 - next) / next) * (transferred / transferSpeed)
-        : 0
-
-    set({
-      transferProgress: next,
-      transferSpeed,
-      estimatedTimeRemaining,
-      transferState: next >= 100 ? "completed" : "transferring",
-      transferSessionStatus: next >= 100 ? "completed" : "transferring",
-    })
-
-    if (next >= 100) {
-      get().notifyTransferComplete()
-    }
-  },
-
-  completeMockTransfer: () => {
-    set({
-      transferState: "completed",
-      transferSessionStatus: "completed",
-      transferProgress: 100,
-      estimatedTimeRemaining: 0,
-    })
-    get().notifyTransferComplete()
-  },
 
   resetDiscovery: () => {
     const pending = get().pendingOutgoingRequest
@@ -1095,10 +1415,14 @@ export const selectExitTransferToDiscovery = (state: TransferStoreState) =>
   state.exitTransferToDiscovery
 export const selectExitReceiverMode = (state: TransferStoreState) =>
   state.exitReceiverMode
-export const selectBeginMockTransfer = (state: TransferStoreState) =>
-  state.beginMockTransfer
-export const selectTickMockTransfer = (state: TransferStoreState) =>
-  state.tickMockTransfer
+export const selectBytesTransferred = (state: TransferStoreState) =>
+  state.bytesTransferred
+export const selectActiveTransferTotalBytes = (state: TransferStoreState) =>
+  state.activeTransferTotalBytes
+export const selectStartOutgoingFileTransfer = (state: TransferStoreState) =>
+  state.startOutgoingFileTransfer
+export const selectReceivedFileCount = (state: TransferStoreState) =>
+  Object.keys(state.receivedFilesMemory).length
 export const selectConnectWebSocket = (state: TransferStoreState) =>
   state.connectWebSocket
 export const selectDisconnectWebSocket = (state: TransferStoreState) =>
@@ -1113,8 +1437,14 @@ export const selectExitActiveTransferSession = (state: TransferStoreState) =>
   state.exitActiveTransferSession
 export const selectCompleteTransferAndExit = (state: TransferStoreState) =>
   state.completeTransferAndExit
+export const selectResetTransferFlow = (state: TransferStoreState) =>
+  state.resetTransferFlow
+export const selectCompletionSummary = (state: TransferStoreState) =>
+  state.completionSummary
+export const selectHasCompletionSummary = (state: TransferStoreState) =>
+  state.completionSummary !== null
 export const selectShowTransferComplete = (state: TransferStoreState) =>
-  state.transferState === "completed"
+  state.completionSummary !== null || state.transferState === "completed"
 
 /** @internal Used by tests or dev tools to reset first-launch state */
 export function clearOnboardingForDev(): void {

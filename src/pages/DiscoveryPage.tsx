@@ -5,6 +5,8 @@ import { DiscoveryDeviceList } from "@/components/discovery/DiscoveryDeviceList"
 import { OrbitalRadar } from "@/components/discovery/OrbitalRadar"
 import { BackButton } from "@/components/shared/BackButton"
 import {
+  selectActiveTransferId,
+  selectCompletionSummary,
   selectCancelOutgoingTransferRequest,
   selectMode,
   selectNearbyDeviceCount,
@@ -26,7 +28,8 @@ export function DiscoveryPage() {
   const startDiscovery = useTransferStore(selectStartDiscovery)
   const resetDiscovery = useTransferStore(selectResetDiscovery)
   const cancelOutgoingRequest = useTransferStore(selectCancelOutgoingTransferRequest)
-  const navigateToTransferRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const activeTransferId = useTransferStore(selectActiveTransferId)
+  const completionSummary = useTransferStore(selectCompletionSummary)
   const discoveryStartedRef = useRef(false)
 
   const isRequesting = transferState === "requesting"
@@ -48,25 +51,12 @@ export function DiscoveryPage() {
   }, [mode, transferState, startDiscovery])
 
   useEffect(() => {
-    if (!selectedReceiver || transferState !== "connecting") return
-
-    navigateToTransferRef.current = setTimeout(() => {
-      navigate("/transfer")
-    }, 600)
-
-    return () => {
-      if (navigateToTransferRef.current) {
-        clearTimeout(navigateToTransferRef.current)
-        navigateToTransferRef.current = null
-      }
-    }
-  }, [selectedReceiver, transferState, navigate])
+    if (mode !== "sender") return
+    if (!activeTransferId && !completionSummary) return
+    navigate("/transfer", { replace: true })
+  }, [mode, activeTransferId, completionSummary, navigate])
 
   const handleBack = useCallback(() => {
-    if (navigateToTransferRef.current) {
-      clearTimeout(navigateToTransferRef.current)
-      navigateToTransferRef.current = null
-    }
     if (isRequesting) {
       cancelOutgoingRequest()
     }

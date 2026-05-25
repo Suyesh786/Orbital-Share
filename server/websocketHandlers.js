@@ -7,6 +7,7 @@ import {
   addSocket,
   getClientBySocketId,
   getClientCount,
+  getReceivers,
   registerClient,
   unregisterClient,
 } from "./deviceRegistry.js"
@@ -14,10 +15,14 @@ import {
   handleSocketDisconnectTransferCleanup,
   handleTransferAccept,
   handleTransferCancel,
-  handleTransferComplete,
   handleTransferReject,
   handleTransferRequest,
 } from "./transferHandlers.js"
+import {
+  handleTransferComplete,
+  handleTransferMetadata,
+  relayBinaryFileChunk,
+} from "./transferChunkHandlers.js"
 
 /**
  * @param {unknown} raw
@@ -64,10 +69,9 @@ function handleRegister(socketId, ws, payload) {
 
   if (!registered) return
 
-  console.log("[REGISTER]")
-  console.log(`username: ${trimmedUsername}`)
-  console.log(`mode: ${mode}`)
-  console.log(`deviceId: ${deviceId.trim()}`)
+  console.log(
+    `[REGISTER] socket=${socketId.slice(0, 8)}… mode=${mode} username=${trimmedUsername}`
+  )
 
   ws.send(
     JSON.stringify({
@@ -90,7 +94,19 @@ function handleRegister(socketId, ws, payload) {
  */
 function handleDiscoverReceivers(socketId, ws) {
   const receivers = buildReceiversListFor(socketId)
+  const registrySnapshot = getReceivers().map((client) => ({
+    socketId: client.socketId.slice(0, 8),
+    mode: client.mode,
+    username: client.username,
+  }))
 
+  console.log(
+    `[DISCOVERY] discover_receivers requester=${socketId.slice(0, 8)}… isBinary=false`
+  )
+  console.log(
+    `[DISCOVERY] registry receivers=${registrySnapshot.length}`,
+    registrySnapshot
+  )
   console.log(`[DISCOVERY] Returning ${receivers.length} receivers`)
 
   ws.send(
@@ -119,9 +135,24 @@ export function registerSocketHandlers(ws) {
     })
   )
 
-  ws.on("message", (raw) => {
+  ws.on("message", (raw, isBinary) => {
+    if (isBinary) {
+      const buffer = Buffer.isBuffer(raw) ? raw : Buffer.from(raw)
+      relayBinaryFileChunk(socketId, buffer)
+      return
+    }
+
     const message = parseMessage(raw)
-    if (!message) return
+    if (!message) {
+      console.log(
+        `[WS] JSON parse failed socket=${socketId.slice(0, 8)}… isBinary=${isBinary}`
+      )
+      return
+    }
+
+    console.log(
+      `[WS] message type=${message.type} isBinary=${isBinary} socket=${socketId.slice(0, 8)}…`
+    )
 
     switch (message.type) {
       case "register":
@@ -141,6 +172,9 @@ export function registerSocketHandlers(ws) {
         break
       case "transfer_cancel":
         handleTransferCancel(socketId, message.payload)
+        break
+      case "transfer_metadata":
+        handleTransferMetadata(socketId, message.payload)
         break
       case "transfer_complete":
         handleTransferComplete(socketId, message.payload)

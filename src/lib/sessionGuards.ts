@@ -18,13 +18,21 @@ export function canAccessTransfer(): boolean {
     activeTransferPeer,
     activeTransferId,
     transferSessionStatus,
+    completionSummary,
+    transferState,
   } = useTransferStore.getState()
+
+  if (completionSummary !== null || transferState === "completed") {
+    return true
+  }
 
   if (!activeTransferId || !transferSessionStatus) return false
 
   const sessionActive =
     transferSessionStatus === "connecting" ||
+    transferSessionStatus === "metadata" ||
     transferSessionStatus === "transferring" ||
+    transferSessionStatus === "reconstructing" ||
     transferSessionStatus === "completed"
 
   if (!sessionActive) return false
@@ -60,9 +68,20 @@ export function restoreDiscoverySession(): void {
 
 export function restoreWaitingSession(): void {
   const store = useTransferStore.getState()
-  if (store.mode === "receiver" && store.discoverable) return
+  if (store.mode === "receiver" && store.discoverable) {
+    if (!store.activeTransferId && store.transferState !== "waiting") {
+      store.setTransferState("waiting")
+      store.setConnectionStatus("searching")
+    }
+    if (!store.activeTransferId && store.completionSummary) {
+      store.clearCompletionSummary()
+    }
+    store.registerDevice()
+    return
+  }
   if (store.mode !== "receiver") return
   store.setDiscoverable(true)
   store.setConnectionStatus("searching")
   store.setTransferState("waiting")
+  store.registerDevice()
 }

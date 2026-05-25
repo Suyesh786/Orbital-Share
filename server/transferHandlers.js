@@ -3,7 +3,6 @@ import { getClientBySocketId } from "./deviceRegistry.js"
 import {
   buildAcceptedPayload,
   closeTransferSession,
-  completeAndRemoveTransferSession,
   createTransferSession,
   getTransferBySocketId,
   getTransferSession,
@@ -304,45 +303,6 @@ export function handleTransferCancel(requesterSocketId, payload) {
   })
 
   console.log(`[TRANSFER] Cancelled request to ${targetSocketId.slice(0, 8)}…`)
-}
-
-/**
- * @param {string} socketId
- * @param {unknown} payload
- */
-export function handleTransferComplete(socketId, payload) {
-  if (!payload || typeof payload !== "object") return
-
-  const { transferId } = payload
-  if (typeof transferId !== "string" || !transferId.trim()) return
-
-  const session = getTransferSession(transferId.trim())
-  if (!session) return
-
-  if (
-    socketId !== session.senderSocketId &&
-    socketId !== session.receiverSocketId
-  ) {
-    return
-  }
-
-  const snapshot = completeAndRemoveTransferSession(transferId.trim())
-  if (!snapshot) return
-
-  const completedPayload = {
-    transferId: snapshot.transferId,
-    status: "completed",
-  }
-
-  sendToSocket(snapshot.senderSocketId, {
-    type: "transfer_session_completed",
-    payload: completedPayload,
-  })
-
-  sendToSocket(snapshot.receiverSocketId, {
-    type: "transfer_session_completed",
-    payload: completedPayload,
-  })
 }
 
 /**

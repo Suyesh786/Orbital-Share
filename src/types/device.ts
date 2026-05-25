@@ -48,9 +48,30 @@ export interface NearbyDevice {
 }
 
 export interface TransferFileMetadata {
+  fileId?: string
   name: string
   size: number
   type: string
+}
+
+/** In-memory chunk assembly (receiver) */
+export interface IncomingFileChunkState {
+  metadata: TransferFileMetadata & { fileId: string }
+  chunks: Array<Uint8Array | null>
+  receivedBytes: number
+  totalChunks: number
+  completed: boolean
+}
+
+/** Reconstructed in-memory file (receiver, Phase 3.1 — no download) */
+export interface ReceivedFileMemory {
+  fileId: string
+  name: string
+  size: number
+  type: string
+  receivedBytes: number
+  completed: boolean
+  blob: Blob
 }
 
 export interface IncomingTransferRequest {
@@ -79,7 +100,9 @@ export interface PendingOutgoingRequest {
 export type TransferSessionStatus =
   | "requesting"
   | "connecting"
+  | "metadata"
   | "transferring"
+  | "reconstructing"
   | "completed"
   | "cancelled"
   | "failed"
@@ -100,4 +123,13 @@ export interface PersistedDeviceState {
   username: string | null
   deviceId: string | null
   onboardingCompleted: boolean
+}
+
+/** Immutable snapshot for completion UI — independent of live session state */
+export interface CompletionSummary {
+  mode: "sender" | "receiver"
+  fileCount: number
+  totalBytes: number
+  fileNames: string[]
+  peerUsername?: string
 }

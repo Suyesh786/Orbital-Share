@@ -6,9 +6,11 @@ import {
   parseTransferSessionClosedPayload,
   parseTransferSessionCompletedPayload,
   parseTransferSessionFailedPayload,
+  parseTransferMetadataPayload,
   parseTransferRequestCancelledPayload,
   parseTransferRequestRejectedPayload,
   type IncomingTransferRequestPayload,
+  type TransferMetadataPayload,
   type InboundWebSocketMessage,
   type ReceiverDiscoveryEntry,
   type RegisterPayload,
@@ -41,6 +43,8 @@ export interface InboundMessageHandlers {
   onTransferSessionClosed?: (payload: TransferSessionClosedPayload) => void
   onTransferSessionFailed?: (payload: TransferSessionFailedPayload) => void
   onTransferSessionCompleted?: (payload: TransferSessionCompletedPayload) => void
+  onTransferMetadata?: (payload: TransferMetadataPayload) => void
+  onBinaryMessage?: (data: ArrayBuffer) => void
   onMessage?: (message: InboundWebSocketMessage) => void
 }
 
@@ -216,7 +220,20 @@ class WebSocketService {
       return
     }
 
+    if (message.type === "transfer_metadata") {
+      const metadata = parseTransferMetadataPayload(message.payload)
+      if (metadata) {
+        this.handlers.onTransferMetadata?.(metadata)
+      }
+      this.handlers.onMessage?.(message as InboundWebSocketMessage)
+      return
+    }
+
     this.handlers.onMessage?.(message as InboundWebSocketMessage)
+  }
+
+  private async routeBinaryMessage(raw: ArrayBuffer) {
+    this.handlers.onBinaryMessage?.(raw)
   }
 
   connect(handlers: WebSocketHandlers = {}) {
@@ -267,7 +284,16 @@ class WebSocketService {
     }
 
     this.socket.onmessage = (event) => {
-      this.routeInboundMessage(event.data)
+      const data = event.data
+      if (data instanceof ArrayBuffer) {
+        void this.routeBinaryMessage(data)
+        return
+      }
+      if (data instanceof Blob) {
+        void data.arrayBuffer().then((buffer) => this.routeBinaryMessage(buffer))
+        return
+      }
+      this.routeInboundMessage(data)
     }
   }
 
@@ -325,8 +351,16 @@ class WebSocketService {
     return this.send(JSON.stringify({ type: "transfer_cancel", payload }))
   }
 
+  sendTransferMetadata(payload: TransferMetadataPayload) {
+    return this.send(JSON.stringify({ type: "transfer_metadata", payload }))
+  }
+
   sendTransferComplete(payload: TransferCompleteOutboundPayload) {
     return this.send(JSON.stringify({ type: "transfer_complete", payload }))
+  }
+
+  sendBinary(payload: ArrayBuffer) {
+    return this.send(payload)
   }
 
   setHandlers(handlers: WebSocketHandlers) {

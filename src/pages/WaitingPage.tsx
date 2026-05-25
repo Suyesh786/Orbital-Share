@@ -1,15 +1,16 @@
-import { useCallback, useEffect, useRef } from "react"
+import { useCallback, useEffect } from "react"
 import { motion } from "framer-motion"
 import { useNavigate } from "react-router-dom"
 import { BackButton } from "@/components/shared/BackButton"
 import { ProfileAvatar } from "@/components/profile/ProfileAvatar"
 import { IncomingTransferRequestModal } from "@/components/transfer/IncomingTransferRequestModal"
 import {
+  selectActiveTransferId,
+  selectCompletionSummary,
   selectConnectionStatus,
   selectDiscoverable,
   selectExitReceiverMode,
   selectMode,
-  selectTransferState,
   selectUsername,
   useTransferStore,
 } from "@/store/useTransferStore"
@@ -20,26 +21,17 @@ export function WaitingPage() {
   const discoverable = useTransferStore(selectDiscoverable)
   const connectionStatus = useTransferStore(selectConnectionStatus)
   const mode = useTransferStore(selectMode)
-  const transferState = useTransferStore(selectTransferState)
+  const activeTransferId = useTransferStore(selectActiveTransferId)
+  const completionSummary = useTransferStore(selectCompletionSummary)
   const exitReceiverMode = useTransferStore(selectExitReceiverMode)
-  const navigateToTransferRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const isSearching = connectionStatus === "searching"
 
   useEffect(() => {
-    if (transferState !== "connecting") return
-
-    navigateToTransferRef.current = setTimeout(() => {
-      navigate("/transfer")
-    }, 600)
-
-    return () => {
-      if (navigateToTransferRef.current) {
-        clearTimeout(navigateToTransferRef.current)
-        navigateToTransferRef.current = null
-      }
-    }
-  }, [transferState, navigate])
+    if (mode !== "receiver") return
+    if (!activeTransferId && !completionSummary) return
+    navigate("/transfer", { replace: true })
+  }, [mode, activeTransferId, completionSummary, navigate])
 
   const handleBack = useCallback(() => {
     exitReceiverMode()

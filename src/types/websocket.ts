@@ -48,9 +48,23 @@ export interface RegisteredMessage {
 }
 
 export interface TransferFilePayload {
+  fileId?: string
   name: string
   size: number
   type: string
+}
+
+export interface TransferMetadataFileEntry {
+  fileId: string
+  name: string
+  size: number
+  type: string
+}
+
+export interface TransferMetadataPayload {
+  transferId: string
+  files: TransferMetadataFileEntry[]
+  totalBytes: number
 }
 
 export interface TransferRequestOutboundPayload {
@@ -134,6 +148,7 @@ export type OutboundWebSocketMessage =
   | { type: "transfer_accept"; payload: TransferAcceptPayload }
   | { type: "transfer_reject"; payload: TransferRejectPayload }
   | { type: "transfer_cancel"; payload: TransferCancelPayload }
+  | { type: "transfer_metadata"; payload: TransferMetadataPayload }
   | { type: "transfer_complete"; payload: TransferCompleteOutboundPayload }
 
 export type InboundWebSocketMessage =
@@ -148,6 +163,7 @@ export type InboundWebSocketMessage =
   | { type: "transfer_session_closed"; payload: TransferSessionClosedPayload }
   | { type: "transfer_session_failed"; payload: TransferSessionFailedPayload }
   | { type: "transfer_session_completed"; payload: TransferSessionCompletedPayload }
+  | { type: "transfer_metadata"; payload: TransferMetadataPayload }
 
 export interface ParsedServerMessage {
   type: string
@@ -335,4 +351,37 @@ export function parseTransferSessionCompletedPayload(
     transferId: p.transferId,
     status: typeof p.status === "string" ? p.status : "completed",
   }
+}
+
+function isTransferMetadataFileEntry(
+  value: unknown
+): value is TransferMetadataFileEntry {
+  if (!value || typeof value !== "object") return false
+  const f = value as TransferMetadataFileEntry
+  return (
+    typeof f.fileId === "string" &&
+    typeof f.name === "string" &&
+    typeof f.size === "number" &&
+    typeof f.type === "string"
+  )
+}
+
+export function parseTransferMetadataPayload(
+  payload: unknown
+): TransferMetadataPayload | null {
+  if (!payload || typeof payload !== "object") return null
+  const p = payload as TransferMetadataPayload
+  if (typeof p.transferId !== "string" || !Array.isArray(p.files)) {
+    return null
+  }
+
+  const files = p.files.filter(isTransferMetadataFileEntry)
+  if (files.length === 0) return null
+
+  const totalBytes =
+    typeof p.totalBytes === "number"
+      ? p.totalBytes
+      : files.reduce((sum, f) => sum + f.size, 0)
+
+  return { transferId: p.transferId, files, totalBytes }
 }
