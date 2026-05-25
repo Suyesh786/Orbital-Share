@@ -5,6 +5,7 @@ import { OverallTransferProgress } from "@/components/transfer/OverallTransferPr
 import { PerFileTransferProgressList } from "@/components/transfer/PerFileTransferProgressList"
 import { ReceivedFileSelectionList } from "@/components/transfer/ReceivedFileSelectionList"
 import { TransferCompleteHeader } from "@/components/transfer/TransferCompleteHeader"
+import { TransferFinalizingOverlay } from "@/components/transfer/TransferFinalizingOverlay"
 import { useNavigate } from "react-router-dom"
 import { BackButton } from "@/components/shared/BackButton"
 import { GlowButton } from "@/components/shared/GlowButton"
@@ -33,6 +34,7 @@ import {
   selectResetTransferFlow,
   selectSelectedFiles,
   selectSelectedReceiverUsername,
+  selectShowFinalizingOverlay,
   selectShowTransferComplete,
   selectStartOutgoingFileTransfer,
   selectTransferProgress,
@@ -129,6 +131,7 @@ export function TransferPage() {
 
   const transferStartedRef = useRef(false)
   const complete = hasCompletionSummary
+  const showFinalizingOverlay = useTransferStore(selectShowFinalizingOverlay)
 
   useEffect(() => {
     if (!hasActiveSession || mode !== "sender" || hasCompletionSummary) return
@@ -256,7 +259,7 @@ export function TransferPage() {
   return (
     <div
       className={cn(
-        "flex h-full flex-col px-6",
+        "relative flex h-full flex-col px-6",
         complete
           ? "items-center justify-center"
           : "items-center justify-start overflow-y-auto pt-14 pb-10"
@@ -265,6 +268,8 @@ export function TransferPage() {
       <div className="absolute left-6 top-0">
         {!complete && isSender && <BackButton onBack={handleBack} />}
       </div>
+
+      <TransferFinalizingOverlay visible={showFinalizingOverlay} />
 
       <AnimatePresence mode="wait">
         {!complete ? (

@@ -2,6 +2,8 @@ export const STORAGE_KEYS = {
   username: "orbitalshare_username",
   deviceId: "orbitalshare_device_id",
   onboarding: "orbitalshare_onboarding",
+  trustedDevices: "orbitalshare_trusted_devices",
+  deviceInteractions: "orbitalshare_device_interactions",
 } as const
 
 export type AppMode = "idle" | "sender" | "receiver"
@@ -45,6 +47,8 @@ export interface NearbyDevice {
   angle: number
   /** Orbital radar ring index */
   orbit: number
+  /** Pixel distance from radar center (collision-aware placement) */
+  radiusPx: number
 }
 
 export interface TransferFileMetadata {

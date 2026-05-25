@@ -63,6 +63,7 @@ export interface TransferMetadataFileEntry {
 
 export interface TransferMetadataPayload {
   transferId: string
+  sessionToken: string
   files: TransferMetadataFileEntry[]
   totalBytes: number
 }
@@ -86,6 +87,11 @@ export interface TransferCancelPayload {
   targetSocketId: string
 }
 
+export interface TransferAbortPayload {
+  transferId: string
+  sessionToken: string
+}
+
 export interface IncomingTransferRequestPayload {
   requestId: string
   requesterSocketId: string
@@ -99,6 +105,7 @@ export interface IncomingTransferRequestPayload {
 
 export interface TransferRequestAcceptedPayload {
   transferId: string
+  sessionToken: string
   senderSocketId: string
   receiverSocketId: string
   senderUsername: string
@@ -125,11 +132,13 @@ export interface TransferSessionFailedPayload {
 
 export interface TransferSessionCompletedPayload {
   transferId: string
+  sessionToken?: string
   status: string
 }
 
 export interface TransferCompleteOutboundPayload {
   transferId: string
+  sessionToken: string
 }
 
 export interface TransferRequestRejectedPayload {
@@ -148,6 +157,7 @@ export type OutboundWebSocketMessage =
   | { type: "transfer_accept"; payload: TransferAcceptPayload }
   | { type: "transfer_reject"; payload: TransferRejectPayload }
   | { type: "transfer_cancel"; payload: TransferCancelPayload }
+  | { type: "transfer_abort"; payload: TransferAbortPayload }
   | { type: "transfer_metadata"; payload: TransferMetadataPayload }
   | { type: "transfer_complete"; payload: TransferCompleteOutboundPayload }
 
@@ -174,6 +184,9 @@ export interface ParsedServerMessage {
 
 export function parseServerMessage(raw: unknown): ParsedServerMessage | null {
   try {
+    if (typeof raw === "string" && raw.length > 512 * 1024) {
+      return null
+    }
     const text = typeof raw === "string" ? raw : String(raw)
     const data = JSON.parse(text) as ParsedServerMessage
     if (!data || typeof data !== "object" || typeof data.type !== "string") {
@@ -257,6 +270,7 @@ export function parseTransferRequestAcceptedPayload(
   const p = payload as TransferRequestAcceptedPayload
   if (
     typeof p.transferId !== "string" ||
+    typeof p.sessionToken !== "string" ||
     typeof p.senderSocketId !== "string" ||
     typeof p.receiverSocketId !== "string" ||
     typeof p.senderUsername !== "string" ||
@@ -273,6 +287,7 @@ export function parseTransferRequestAcceptedPayload(
 
   return {
     transferId: p.transferId,
+    sessionToken: p.sessionToken,
     senderSocketId: p.senderSocketId,
     receiverSocketId: p.receiverSocketId,
     senderUsername: p.senderUsername,
@@ -349,6 +364,8 @@ export function parseTransferSessionCompletedPayload(
   if (typeof p.transferId !== "string") return null
   return {
     transferId: p.transferId,
+    sessionToken:
+      typeof p.sessionToken === "string" ? p.sessionToken : undefined,
     status: typeof p.status === "string" ? p.status : "completed",
   }
 }
@@ -371,7 +388,11 @@ export function parseTransferMetadataPayload(
 ): TransferMetadataPayload | null {
   if (!payload || typeof payload !== "object") return null
   const p = payload as TransferMetadataPayload
-  if (typeof p.transferId !== "string" || !Array.isArray(p.files)) {
+  if (
+    typeof p.transferId !== "string" ||
+    typeof p.sessionToken !== "string" ||
+    !Array.isArray(p.files)
+  ) {
     return null
   }
 
@@ -383,5 +404,10 @@ export function parseTransferMetadataPayload(
       ? p.totalBytes
       : files.reduce((sum, f) => sum + f.size, 0)
 
-  return { transferId: p.transferId, files, totalBytes }
+  return {
+    transferId: p.transferId,
+    sessionToken: p.sessionToken,
+    files,
+    totalBytes,
+  }
 }

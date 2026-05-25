@@ -26,7 +26,7 @@ export function AppRoutes() {
         <Route
           path="/"
           element={
-            <PageTransition className="h-full">
+            <PageTransition className="h-full" variant="home">
               <HomePage />
             </PageTransition>
           }

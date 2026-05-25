@@ -1,10 +1,21 @@
 import { getClientBySocketId } from "./deviceRegistry.js"
 import {
+  isReasonableChunkPacket,
+  validateTransferMetadataPayload,
+} from "./transferPayloadValidation.js"
+import {
+  logSecurity,
+  validateSecureChunkSender,
+  validateSecureTransferEvent,
+} from "./transferSessionSecurity.js"
+import {
   completeAndRemoveTransferSession,
-  getTransferBySocketId,
-  getTransferSession,
+  markSessionLifecycleCompleted,
+  markSessionMetadataDelivered,
+  transitionTransferSessionStatus,
   updateTransferSession,
 } from "./transferSessions.js"
+import { allowChunkRelay } from "./chunkFloodProtection.js"
 
 const CHUNK_MESSAGE_TYPE = 1
 
@@ -31,7 +42,7 @@ function sendToSocket(socketId, message) {
 function parseTransferMetadataPayload(payload) {
   if (!payload || typeof payload !== "object") return null
 
-  const { transferId, files, totalBytes } = payload
+  const { transferId, sessionToken, files, totalBytes } = payload
   if (typeof transferId !== "string" || !Array.isArray(files)) return null
 
   const parsedFiles = files
@@ -60,6 +71,8 @@ function parseTransferMetadataPayload(payload) {
 
   return {
     transferId: transferId.trim(),
+    sessionToken:
+      typeof sessionToken === "string" ? sessionToken.trim() : "",
     files: parsedFiles,
     totalBytes: bytes,
   }
@@ -71,13 +84,34 @@ function parseTransferMetadataPayload(payload) {
  */
 export function handleTransferMetadata(senderSocketId, payload) {
   const parsed = parseTransferMetadataPayload(payload)
-  if (!parsed) return
+  if (!parsed) {
+    logSecurity("invalid_payload", "transfer_metadata")
+    return
+  }
 
-  const session = getTransferSession(parsed.transferId)
-  if (!session || session.senderSocketId !== senderSocketId) return
+  const session = validateSecureTransferEvent({
+    socketId: senderSocketId,
+    transferId: parsed.transferId,
+    sessionToken: parsed.sessionToken,
+    role: "sender",
+    eventKind: "metadata",
+  })
+  if (!session) return
+
+  const metaCheck = validateTransferMetadataPayload(parsed)
+  if (!metaCheck.valid) {
+    logSecurity("invalid_metadata", metaCheck.reason ?? "validation failed")
+    return
+  }
+
+  const transitioned = transitionTransferSessionStatus(
+    parsed.transferId,
+    "transferring",
+    "metadata"
+  )
+  if (!transitioned) return
 
   updateTransferSession(parsed.transferId, {
-    status: "transferring",
     files: parsed.files.map((f) => ({
       name: f.name,
       size: f.size,
@@ -86,9 +120,16 @@ export function handleTransferMetadata(senderSocketId, payload) {
     totalBytes: parsed.totalBytes,
   })
 
+  markSessionMetadataDelivered(parsed.transferId)
+
   sendToSocket(session.receiverSocketId, {
     type: "transfer_metadata",
-    payload: parsed,
+    payload: {
+      transferId: parsed.transferId,
+      sessionToken: session.sessionToken,
+      files: parsed.files,
+      totalBytes: parsed.totalBytes,
+    },
   })
 
   console.log(
@@ -102,11 +143,18 @@ export function handleTransferMetadata(senderSocketId, payload) {
  * @param {Buffer} buffer
  */
 export function relayBinaryFileChunk(senderSocketId, buffer) {
-  if (!Buffer.isBuffer(buffer) || buffer.length < 5) return
+  if (!isReasonableChunkPacket(buffer)) {
+    logSecurity("invalid_chunk", `packet sender=${senderSocketId.slice(0, 8)}`)
+    return
+  }
   if (buffer[0] !== CHUNK_MESSAGE_TYPE) return
 
-  const session = getTransferBySocketId(senderSocketId)
-  if (!session || session.senderSocketId !== senderSocketId) return
+  if (!allowChunkRelay(senderSocketId, buffer)) {
+    return
+  }
+
+  const session = validateSecureChunkSender(senderSocketId)
+  if (!session) return
 
   const receiver = getClientBySocketId(session.receiverSocketId)
   if (!receiver || receiver.ws.readyState !== 1) return
@@ -114,7 +162,7 @@ export function relayBinaryFileChunk(senderSocketId, buffer) {
   try {
     receiver.ws.send(buffer)
   } catch {
-    /* ignore relay failure */
+    logSecurity("chunk_relay_failed", session.transferId.slice(0, 8))
   }
 }
 
@@ -126,19 +174,30 @@ export function relayBinaryFileChunk(senderSocketId, buffer) {
 export function handleTransferComplete(socketId, payload) {
   if (!payload || typeof payload !== "object") return
 
-  const { transferId } = payload
-  if (typeof transferId !== "string" || !transferId.trim()) return
+  const { transferId, sessionToken } = payload
+  if (typeof transferId !== "string" || !transferId.trim()) {
+    logSecurity("invalid_payload", "transfer_complete")
+    return
+  }
 
-  const session = getTransferSession(transferId.trim())
+  const session = validateSecureTransferEvent({
+    socketId,
+    transferId: transferId.trim(),
+    sessionToken:
+      typeof sessionToken === "string" ? sessionToken.trim() : "",
+    role: "receiver",
+    eventKind: "complete",
+  })
   if (!session) return
 
-  if (socketId !== session.receiverSocketId) return
+  markSessionLifecycleCompleted(transferId.trim())
 
   const snapshot = completeAndRemoveTransferSession(transferId.trim())
   if (!snapshot) return
 
   const completedPayload = {
     transferId: snapshot.transferId,
+    sessionToken: snapshot.sessionToken,
     status: "completed",
   }
 

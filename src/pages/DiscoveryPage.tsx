@@ -3,6 +3,7 @@ import { motion } from "framer-motion"
 import { useNavigate } from "react-router-dom"
 import { DiscoveryDeviceList } from "@/components/discovery/DiscoveryDeviceList"
 import { OrbitalRadar } from "@/components/discovery/OrbitalRadar"
+import { useTrustSuggestions } from "@/components/trust/useTrustSuggestions"
 import { BackButton } from "@/components/shared/BackButton"
 import {
   selectActiveTransferId,
@@ -10,6 +11,7 @@ import {
   selectCancelOutgoingTransferRequest,
   selectMode,
   selectNearbyDeviceCount,
+  selectRefreshTrustedNearbyDevices,
   selectResetDiscovery,
   selectSelectedReceiver,
   selectStartDiscovery,
@@ -17,6 +19,7 @@ import {
   selectTransferState,
   useTransferStore,
 } from "@/store/useTransferStore"
+import type { NearbyDevice } from "@/types/device"
 
 export function DiscoveryPage() {
   const navigate = useNavigate()
@@ -28,9 +31,14 @@ export function DiscoveryPage() {
   const startDiscovery = useTransferStore(selectStartDiscovery)
   const resetDiscovery = useTransferStore(selectResetDiscovery)
   const cancelOutgoingRequest = useTransferStore(selectCancelOutgoingTransferRequest)
+  const refreshTrustedNearbyDevices = useTransferStore(
+    selectRefreshTrustedNearbyDevices
+  )
   const activeTransferId = useTransferStore(selectActiveTransferId)
   const completionSummary = useTransferStore(selectCompletionSummary)
   const discoveryStartedRef = useRef(false)
+
+  const trustSuggestion = useTrustSuggestions("sender")
 
   const isRequesting = transferState === "requesting"
 
@@ -56,6 +64,15 @@ export function DiscoveryPage() {
     navigate("/transfer", { replace: true })
   }, [mode, activeTransferId, completionSummary, navigate])
 
+  useEffect(() => {
+    const onTrustChanged = () => {
+      refreshTrustedNearbyDevices()
+    }
+    window.addEventListener("orbitalshare-trust-changed", onTrustChanged)
+    return () =>
+      window.removeEventListener("orbitalshare-trust-changed", onTrustChanged)
+  }, [refreshTrustedNearbyDevices])
+
   const handleBack = useCallback(() => {
     if (isRequesting) {
       cancelOutgoingRequest()
@@ -69,6 +86,14 @@ export function DiscoveryPage() {
     cancelOutgoingRequest()
   }, [cancelOutgoingRequest])
 
+  const handleRequestTransfer = useCallback(
+    (device: NearbyDevice) => {
+      useTransferStore.getState().requestTransferToReceiver(device)
+      trustSuggestion.tryShowSuggestion(device.id, device.username)
+    },
+    [trustSuggestion]
+  )
+
   const showEmptyState =
     nearbyDeviceCount === 0 &&
     transferState === "discovering" &&
@@ -76,7 +101,7 @@ export function DiscoveryPage() {
     !rejectionMessage
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="relative flex h-full flex-col">
       <BackButton onBack={handleBack} />
 
       <header className="mt-1 text-center">
@@ -115,8 +140,8 @@ export function DiscoveryPage() {
           </motion.div>
         ) : (
           <>
-            <OrbitalRadar />
-            <DiscoveryDeviceList />
+            <OrbitalRadar onRequestTransfer={handleRequestTransfer} />
+            <DiscoveryDeviceList onRequestTransfer={handleRequestTransfer} />
           </>
         )}
       </div>

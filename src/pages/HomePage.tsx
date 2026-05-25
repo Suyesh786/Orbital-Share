@@ -1,38 +1,17 @@
 import { motion } from "framer-motion"
-import {
-  FileText,
-  FolderOpen,
-  Image,
-  Send,
-  Video,
-} from "lucide-react"
+import { Download, Send } from "lucide-react"
 import { useNavigate } from "react-router-dom"
-import { GlowButton } from "@/components/shared/GlowButton"
-import { Logo } from "@/components/shared/Logo"
-import { StatusSection } from "@/components/shared/StatusIndicator"
+import { HomeActionButton } from "@/components/home/HomeActionButton"
+import { HomeAmbientBackground } from "@/components/home/HomeAmbientBackground"
+import { HomeStatusBar } from "@/components/home/HomeStatusBar"
+import { NearDropMark } from "@/components/shared/NearDropMark"
 import {
   selectStartReceiveFlow,
   selectStartSendFlow,
   useTransferStore,
 } from "@/store/useTransferStore"
 
-const quickActions = [
-  { label: "Photos", icon: Image },
-  { label: "Videos", icon: Video },
-  { label: "Documents", icon: FileText },
-  { label: "Folders", icon: FolderOpen },
-]
-
-const stagger = {
-  animate: {
-    transition: { staggerChildren: 0.08 },
-  },
-}
-
-const fadeUp = {
-  initial: { opacity: 0, y: 16 },
-  animate: { opacity: 1, y: 0 },
-}
+const easeOut = [0.22, 1, 0.36, 1] as const
 
 export function HomePage() {
   const navigate = useNavigate()
@@ -50,60 +29,58 @@ export function HomePage() {
   }
 
   return (
-    <motion.div
-      className="flex h-full flex-col"
-      variants={stagger}
-      initial="initial"
-      animate="animate"
-    >
-      <motion.header variants={fadeUp} className="flex flex-col items-center pt-2">
-        <Logo />
-        <h1 className="mt-4 text-2xl font-semibold tracking-tight text-white">
-          Orbital Share
-        </h1>
-        <p className="mt-1 text-sm text-white/45">
-          Local Wireless File Transfer
-        </p>
-      </motion.header>
+    <div className="relative flex h-full min-h-0 flex-col">
+      <HomeAmbientBackground intro />
 
-      <motion.div
-        variants={fadeUp}
-        className="mt-8 flex flex-1 flex-col justify-center gap-3 px-4"
-      >
-        <GlowButton onClick={handleSend}>
-          <span className="flex items-center justify-center gap-2">
-            <Send className="size-4" />
-            Send Files
-          </span>
-        </GlowButton>
-        <GlowButton onClick={handleReceive}>
-          Receive Files
-        </GlowButton>
-      </motion.div>
+      <div className="relative z-[1] flex min-h-0 flex-1 flex-col">
+        <div className="flex flex-1 flex-col items-center justify-center px-10 pb-4 pt-0">
+          <div className="-mt-14 flex flex-col items-center">
+            <NearDropMark size={80} intro />
 
-      <motion.section variants={fadeUp} className="mt-6">
-        <p className="mb-3 text-center text-[11px] font-medium uppercase tracking-widest text-white/30">
-          Quick Actions
-        </p>
-        <div className="grid grid-cols-4 gap-2">
-          {quickActions.map(({ label, icon: Icon }) => (
-            <motion.button
-              key={label}
-              type="button"
-              className="glass-panel flex flex-col items-center gap-2 rounded-xl py-3 text-white/50 transition-colors hover:border-white/15 hover:text-white/70"
-              whileHover={{ y: -2 }}
-              whileTap={{ scale: 0.97 }}
+            <motion.div
+              className="mt-5 text-center"
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.42, ease: easeOut, delay: 0.28 }}
             >
-              <Icon className="size-4" />
-              <span className="text-[10px] font-medium">{label}</span>
-            </motion.button>
-          ))}
-        </div>
-      </motion.section>
+              <h1 className="neardrop-title text-[32px] font-semibold tracking-[-0.04em]">
+                NearDrop
+              </h1>
+            </motion.div>
 
-      <motion.footer variants={fadeUp} className="mt-auto pb-2 pt-6">
-        <StatusSection />
-      </motion.footer>
-    </motion.div>
+            <motion.p
+              className="mt-2 text-center text-[14.5px] font-normal tracking-[0.04em] text-white/40"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.38, ease: easeOut, delay: 0.4 }}
+            >
+              Local wireless file transfer
+            </motion.p>
+
+            <div className="mt-10 flex w-full max-w-[380px] flex-col gap-3">
+              <HomeActionButton
+                onClick={handleSend}
+                icon={Send}
+                primary
+                introDelay={0.48}
+              >
+                Send files
+              </HomeActionButton>
+              <HomeActionButton
+                onClick={handleReceive}
+                icon={Download}
+                introDelay={0.56}
+              >
+                Receive files
+              </HomeActionButton>
+            </div>
+          </div>
+        </div>
+
+        <div className="px-7">
+          <HomeStatusBar introDelay={0.72} />
+        </div>
+      </div>
+    </div>
   )
 }

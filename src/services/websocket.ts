@@ -1,4 +1,8 @@
 import {
+  guardInboundJsonSize,
+  parseServerNoticeMessage,
+} from "@/lib/wsDefensiveGuards"
+import {
   parseIncomingTransferRequestPayload,
   parseReceiversListPayload,
   parseServerMessage,
@@ -16,6 +20,7 @@ import {
   type RegisterPayload,
   type RegistrationMode,
   type TransferAcceptPayload,
+  type TransferAbortPayload,
   type TransferCancelPayload,
   type TransferRejectPayload,
   type TransferRequestAcceptedPayload,
@@ -34,6 +39,7 @@ export type WebSocketStatusListener = (status: WebSocketConnectionStatus) => voi
 export interface InboundMessageHandlers {
   onConnected?: (socketId: string) => void
   onRegistered?: (mode: RegistrationMode, deviceId: string) => void
+  onServerNotice?: (message: string) => void
   onReceiversList?: (receivers: ReceiverDiscoveryEntry[]) => void
   onReceiversUpdated?: () => void
   onIncomingTransferRequest?: (request: IncomingTransferRequestPayload) => void
@@ -122,8 +128,18 @@ class WebSocketService {
   }
 
   private routeInboundMessage(raw: MessageEvent["data"]) {
+    if (!guardInboundJsonSize(raw)) return
+
     const message = parseServerMessage(raw)
     if (!message) return
+
+    if (message.type === "server_notice") {
+      const notice = parseServerNoticeMessage(message.payload)
+      if (notice) {
+        this.handlers.onServerNotice?.(notice)
+      }
+      return
+    }
 
     if (message.type === "connected" && typeof message.socketId === "string") {
       this.lastSocketId = message.socketId
@@ -349,6 +365,10 @@ class WebSocketService {
 
   sendTransferCancel(payload: TransferCancelPayload) {
     return this.send(JSON.stringify({ type: "transfer_cancel", payload }))
+  }
+
+  sendTransferAbort(payload: TransferAbortPayload) {
+    return this.send(JSON.stringify({ type: "transfer_abort", payload }))
   }
 
   sendTransferMetadata(payload: TransferMetadataPayload) {

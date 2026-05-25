@@ -14,6 +14,7 @@ import {
 import {
   handleSocketDisconnectTransferCleanup,
   handleTransferAccept,
+  handleTransferAbort,
   handleTransferCancel,
   handleTransferReject,
   handleTransferRequest,
@@ -23,21 +24,40 @@ import {
   handleTransferMetadata,
   relayBinaryFileChunk,
 } from "./transferChunkHandlers.js"
+import { evaluateConnectionCapacity, getCapacityBusyMessage, isServerSoftBusy } from "./capacityGuard.js"
+import { allowRate, clearRateLimitsForSocket } from "./rateLimiter.js"
+import { clearChunkFloodState } from "./chunkFloodProtection.js"
+import { parseValidatedMessage } from "./wsMessageValidation.js"
+import { logProduction } from "./productionLog.js"
+
+const RATE_LIMITED_TYPES = new Set([
+  "register",
+  "discover_receivers",
+  "transfer_request",
+  "transfer_accept",
+  "transfer_reject",
+  "transfer_cancel",
+  "transfer_abort",
+  "transfer_metadata",
+  "transfer_complete",
+])
 
 /**
- * @param {unknown} raw
- * @returns {{ type: string, payload?: unknown, socketId?: string, timestamp?: number } | null}
+ * @param {import('ws').WebSocket} ws
+ * @param {string} code
+ * @param {string} message
  */
-function parseMessage(raw) {
+function sendServerNotice(ws, code, message) {
+  if (ws.readyState !== 1) return
   try {
-    const text = typeof raw === "string" ? raw : raw.toString("utf8")
-    const data = JSON.parse(text)
-    if (!data || typeof data !== "object" || typeof data.type !== "string") {
-      return null
-    }
-    return data
+    ws.send(
+      JSON.stringify({
+        type: "server_notice",
+        payload: { code, message },
+      })
+    )
   } catch {
-    return null
+    // ignore send failures
   }
 }
 
@@ -85,6 +105,10 @@ function handleRegister(socketId, ws, payload) {
     })
   )
 
+  if (isServerSoftBusy()) {
+    sendServerNotice(ws, "capacity_busy", getCapacityBusyMessage())
+  }
+
   broadcastReceiversUpdated()
 }
 
@@ -93,6 +117,10 @@ function handleRegister(socketId, ws, payload) {
  * @param {import('ws').WebSocket} ws
  */
 function handleDiscoverReceivers(socketId, ws) {
+  if (isServerSoftBusy()) {
+    sendServerNotice(ws, "capacity_busy", getCapacityBusyMessage())
+  }
+
   const receivers = buildReceiversListFor(socketId)
   const registrySnapshot = getReceivers().map((client) => ({
     socketId: client.socketId.slice(0, 8),
@@ -119,8 +147,9 @@ function handleDiscoverReceivers(socketId, ws) {
 
 /**
  * @param {import('ws').WebSocket} ws
+ * @param {{ softBusy?: boolean }} [options]
  */
-export function registerSocketHandlers(ws) {
+export function registerSocketHandlers(ws, options = {}) {
   const socketId = randomUUID()
   addSocket(socketId, ws)
 
@@ -135,6 +164,10 @@ export function registerSocketHandlers(ws) {
     })
   )
 
+  if (options.softBusy) {
+    sendServerNotice(ws, "capacity_busy", getCapacityBusyMessage())
+  }
+
   ws.on("message", (raw, isBinary) => {
     if (isBinary) {
       const buffer = Buffer.isBuffer(raw) ? raw : Buffer.from(raw)
@@ -142,12 +175,15 @@ export function registerSocketHandlers(ws) {
       return
     }
 
-    const message = parseMessage(raw)
+    const message = parseValidatedMessage(raw)
     if (!message) {
-      console.log(
-        `[WS] JSON parse failed socket=${socketId.slice(0, 8)}… isBinary=${isBinary}`
-      )
       return
+    }
+
+    if (RATE_LIMITED_TYPES.has(message.type)) {
+      if (!allowRate(socketId, message.type)) {
+        return
+      }
     }
 
     console.log(
@@ -173,6 +209,9 @@ export function registerSocketHandlers(ws) {
       case "transfer_cancel":
         handleTransferCancel(socketId, message.payload)
         break
+      case "transfer_abort":
+        handleTransferAbort(socketId, message.payload)
+        break
       case "transfer_metadata":
         handleTransferMetadata(socketId, message.payload)
         break
@@ -192,7 +231,10 @@ export function registerSocketHandlers(ws) {
       )
     }
     handleSocketDisconnectTransferCleanup(socketId)
+    clearRateLimitsForSocket(socketId)
+    clearChunkFloodState(socketId)
     unregisterClient(socketId)
+    logProduction("LISTENER_CLEANUP", `socket closed ${socketId.slice(0, 8)}`)
     console.log("[WS] Client disconnected")
     console.log(`[WS] Total clients: ${getClientCount()}`)
     broadcastReceiversUpdated()
@@ -201,4 +243,24 @@ export function registerSocketHandlers(ws) {
   ws.on("error", (error) => {
     console.error(`[WS] Socket error (${socketId}):`, error.message)
   })
+}
+
+/**
+ * @param {import('ws').WebSocket} ws
+ * @returns {boolean}
+ */
+export function tryAcceptWebSocketConnection(ws) {
+  const capacity = evaluateConnectionCapacity()
+  if (!capacity.accept) {
+    sendServerNotice(ws, "capacity_busy", getCapacityBusyMessage())
+    try {
+      ws.close(1013, "Server busy")
+    } catch {
+      // ignore
+    }
+    return false
+  }
+
+  registerSocketHandlers(ws, { softBusy: capacity.softBusy })
+  return true
 }

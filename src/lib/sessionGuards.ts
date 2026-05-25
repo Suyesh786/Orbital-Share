@@ -73,8 +73,13 @@ export function restoreWaitingSession(): void {
       store.setTransferState("waiting")
       store.setConnectionStatus("searching")
     }
-    if (!store.activeTransferId && store.completionSummary) {
+    if (
+      !store.activeTransferId &&
+      (store.completionSummary || store.transferState === "completed")
+    ) {
       store.clearCompletionSummary()
+      store.setTransferState("waiting")
+      store.setConnectionStatus("searching")
     }
     store.registerDevice()
     return

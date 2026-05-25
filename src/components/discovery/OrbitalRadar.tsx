@@ -1,42 +1,53 @@
-import { useEffect, useState } from "react"
-import { motion } from "framer-motion"
+import { useEffect, useRef, useState } from "react"
+import { AnimatePresence, motion } from "framer-motion"
 import { Monitor } from "lucide-react"
 import { DeviceNode } from "@/components/discovery/DeviceNode"
 import { OrbitRings } from "@/components/discovery/OrbitRings"
 import {
   selectNearbyDevices,
   selectSelectedReceiver,
-  selectRequestTransferToReceiver,
-  selectTransferState,
+  selectCanRequestTransfer,
   useTransferStore,
 } from "@/store/useTransferStore"
 import type { NearbyDevice } from "@/types/device"
 
-export function OrbitalRadar() {
+interface OrbitalRadarProps {
+  onRequestTransfer: (device: NearbyDevice) => void
+}
+
+export function OrbitalRadar({ onRequestTransfer }: OrbitalRadarProps) {
   const nearbyDevices = useTransferStore(selectNearbyDevices)
   const selectedReceiver = useTransferStore(selectSelectedReceiver)
-  const requestTransfer = useTransferStore(selectRequestTransferToReceiver)
-  const transferState = useTransferStore(selectTransferState)
-  const canSelect = transferState === "discovering"
-  const [visibleDevices, setVisibleDevices] = useState<NearbyDevice[]>([])
+  const canSelect = useTransferStore(selectCanRequestTransfer)
+  const seenDeviceIdsRef = useRef(new Set<string>())
+  const [joinPulseIds, setJoinPulseIds] = useState<Set<string>>(new Set())
 
   useEffect(() => {
-    if (!nearbyDevices.length) {
-      setVisibleDevices([])
+    if (nearbyDevices.length === 0) {
+      seenDeviceIdsRef.current.clear()
+      setJoinPulseIds(new Set())
       return
     }
 
-    const timeouts: ReturnType<typeof setTimeout>[] = []
-    setVisibleDevices([])
+    const newlyJoined = new Set<string>()
+    for (const device of nearbyDevices) {
+      if (!seenDeviceIdsRef.current.has(device.id)) {
+        newlyJoined.add(device.id)
+      }
+      seenDeviceIdsRef.current.add(device.id)
+    }
 
-    nearbyDevices.forEach((device, index) => {
-      const timeout = setTimeout(() => {
-        setVisibleDevices((prev) => [...prev, device])
-      }, 400 + index * 450)
-      timeouts.push(timeout)
-    })
+    for (const id of [...seenDeviceIdsRef.current]) {
+      if (!nearbyDevices.some((d) => d.id === id)) {
+        seenDeviceIdsRef.current.delete(id)
+      }
+    }
 
-    return () => timeouts.forEach(clearTimeout)
+    if (newlyJoined.size > 0) {
+      setJoinPulseIds(newlyJoined)
+      const timer = window.setTimeout(() => setJoinPulseIds(new Set()), 1400)
+      return () => window.clearTimeout(timer)
+    }
   }, [nearbyDevices])
 
   return (
@@ -58,15 +69,28 @@ export function OrbitalRadar() {
         <span className="mt-0.5 text-[9px] font-medium text-white/50">You</span>
       </motion.div>
 
-      {visibleDevices.map((device) => (
-        <DeviceNode
-          key={device.id}
-          device={device}
-          selected={selectedReceiver?.socketId === device.socketId}
-          onSelect={() => canSelect && requestTransfer(device)}
-          interactive={canSelect}
-        />
-      ))}
+      <AnimatePresence mode="popLayout">
+        {nearbyDevices.map((device) => (
+          <motion.div
+            key={device.id}
+            className="absolute left-1/2 top-1/2 z-10"
+            initial={{ opacity: 0, scale: 0.82 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.82 }}
+            transition={{ duration: 0.38, ease: [0.22, 1, 0.36, 1] }}
+            layout
+            layoutId={`radar-node-${device.id}`}
+          >
+            <DeviceNode
+              device={device}
+              selected={selectedReceiver?.socketId === device.socketId}
+              onSelect={() => canSelect && onRequestTransfer(device)}
+              interactive={canSelect}
+              showJoinPulse={joinPulseIds.has(device.id)}
+            />
+          </motion.div>
+        ))}
+      </AnimatePresence>
     </div>
   )
 }

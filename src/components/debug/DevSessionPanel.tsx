@@ -16,6 +16,7 @@ import {
   useTransferStore,
 } from "@/store/useTransferStore"
 
+/** Never rendered in production builds. */
 export function DevSessionPanel() {
   if (!import.meta.env.DEV) return null
 

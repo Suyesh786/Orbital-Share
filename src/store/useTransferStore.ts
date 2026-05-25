@@ -1,7 +1,12 @@
 import { create } from "zustand"
 import { computeTotalTransferSize } from "@/store/transferUtils"
 import { websocketService } from "@/services/websocket"
-import { mapReceiversToNearbyDevices } from "@/utils/discovery"
+import { capDiscoveryReceivers } from "@/lib/wsDefensiveGuards"
+import {
+  patchNearbyDevicesTrust,
+  reconcileReceiversToNearbyDevices,
+} from "@/utils/discovery"
+import { clearDiscoveryLayoutRegistry } from "@/lib/discoveryLayoutRegistry"
 import type { ReceiverDiscoveryEntry } from "@/types/websocket"
 import {
   downloadAllReceivedFiles as triggerDownloadAllReceivedFiles,
@@ -24,6 +29,47 @@ import {
   streamOutgoingFiles,
   toMetadataEntries,
 } from "@/services/fileTransferSender"
+import {
+  canAcceptIncomingRequest,
+  canApplySessionStatus,
+  canProcessFileChunk,
+  canProcessTransferMetadata,
+  canStartOutgoingRequest,
+  shouldIgnoreStaleTransferId,
+} from "@/lib/transferSessionLifecycle"
+import { PARTIAL_TRANSFER_CLEAR } from "@/lib/transferCleanup"
+import { validateIncomingChunk } from "@/lib/transferChunkValidation"
+import { validateTransferMetadata } from "@/lib/transferMetadataValidation"
+import { OUTGOING_REQUEST_TIMEOUT_MS } from "@/lib/transferLimits"
+import {
+  humanizeCloseReason,
+  humanizeRejectReason,
+  TRANSFER_USER_MESSAGES,
+} from "@/lib/transferUserMessages"
+import {
+  scheduleAfterOverlayPaint,
+  shouldShowFinalizingOverlay,
+} from "@/lib/transferFinalizing"
+import {
+  shouldRejectTransferEvent,
+  validateAcceptedSessionIdentity,
+} from "@/lib/transferEventSecurity"
+import { buildSessionIdentity } from "@/lib/transferSessionIdentity"
+import { incrementInteractionCount } from "@/lib/trustedDevices"
+import { enqueueTrustSuggestion } from "@/store/useTrustInboxStore"
+import {
+  logLifecycleReset,
+  logReconstructReset,
+  logRoleSwap,
+  logSessionReleased,
+  logTransferFinalized,
+  type LifecycleResetOptions,
+  type LifecycleResetReason,
+} from "@/lib/transferLifecycleReset"
+import {
+  validateActiveSelection,
+  validateFilesToAdd,
+} from "@/lib/validateSelectedFiles"
 import type {
   AppMode,
   ConnectionStatus,
@@ -90,16 +136,20 @@ interface TransferStoreState {
   perFileTransferProgress: Record<string, PerFileTransferProgress>
   perFileProgressOrder: string[]
   selectedCompletedFileIds: Record<string, boolean>
+  isFinalizingTransfer: boolean
+  isReconstructingFiles: boolean
 
   // Transfer requests (Phase 2.4)
   incomingTransferRequest: IncomingTransferRequest | null
   pendingOutgoingRequest: PendingOutgoingRequest | null
   transferRejectionMessage: string | null
+  transferNoticeMessage: string | null
   activeTransferPeer: TransferPeer | null
   incomingFilesMetadata: TransferFileMetadata[]
 
   // Transfer session (Phase 2.5 — server-authoritative)
   activeTransferId: string
+  activeTransferSessionToken: string
   transferSessionStatus: TransferSessionStatus | null
   transferStartedAt: number | null
 
@@ -128,6 +178,7 @@ interface TransferStoreState {
   discoverReceivers: () => void
   clearNearbyDevices: () => void
   applyReceiversList: (receivers: ReceiverDiscoveryEntry[]) => void
+  refreshTrustedNearbyDevices: () => void
   requestTransferToReceiver: (device: NearbyDevice) => void
   cancelOutgoingTransferRequest: () => void
   acceptIncomingTransferRequest: () => void
@@ -167,10 +218,12 @@ interface TransferStoreState {
   finalizeLocalTransferSession: () => void
   completeTransferAndExit: () => void
   exitActiveTransferSession: () => void
+  abortActiveTransferSession: (userMessage?: string) => void
   startOutgoingFileTransfer: () => Promise<void>
   applyTransferMetadata: (payload: TransferMetadataPayload) => void
   applyFileChunk: (chunk: ReturnType<typeof decodeFileChunk>) => void
   reconstructReceivedFiles: () => void
+  scheduleReconstructReceivedFiles: () => void
   downloadAllReceivedFiles: () => number
   downloadSelectedReceivedFiles: () => number
   toggleCompletedFileSelection: (fileId: string) => void
@@ -200,12 +253,16 @@ const initialTransferSession = {
   perFileTransferProgress: {} as Record<string, PerFileTransferProgress>,
   perFileProgressOrder: [] as string[],
   selectedCompletedFileIds: {} as Record<string, boolean>,
+  isFinalizingTransfer: false,
+  isReconstructingFiles: false,
   incomingTransferRequest: null as IncomingTransferRequest | null,
   pendingOutgoingRequest: null as PendingOutgoingRequest | null,
   transferRejectionMessage: null as string | null,
+  transferNoticeMessage: null as string | null,
   activeTransferPeer: null as TransferPeer | null,
   incomingFilesMetadata: [] as TransferFileMetadata[],
   activeTransferId: "",
+  activeTransferSessionToken: "",
   transferSessionStatus: null as TransferSessionStatus | null,
   transferStartedAt: null as number | null,
   completionSummary: null as CompletionSummary | null,
@@ -215,6 +272,60 @@ const initialTransferSession = {
 let wsStatusUnsubscribe: (() => void) | null = null
 let rejectionClearTimer: ReturnType<typeof setTimeout> | null = null
 let transferCompleteSentForId = ""
+let outgoingRequestTimeout: ReturnType<typeof setTimeout> | null = null
+let incomingAcceptInFlight = false
+let pendingAcceptRequesterSocketId: string | null = null
+let outgoingStreamAborted = false
+let reconstructInFlight = false
+
+function clearOutgoingRequestTimeout() {
+  if (outgoingRequestTimeout) {
+    clearTimeout(outgoingRequestTimeout)
+    outgoingRequestTimeout = null
+  }
+}
+
+function clearIncomingAcceptGuard() {
+  incomingAcceptInFlight = false
+  pendingAcceptRequesterSocketId = null
+}
+
+/**
+ * Authoritative reset of module-level transfer runtime flags.
+ * Must run before every new session and after every terminal session end.
+ */
+function resetEntireTransferLifecycle(
+  reason: LifecycleResetReason,
+  options: LifecycleResetOptions = {}
+) {
+  logLifecycleReset(reason)
+  clearRejectionTimer()
+  clearOutgoingRequestTimeout()
+  clearIncomingAcceptGuard()
+  transferCompleteSentForId = ""
+  outgoingTransferInFlight = false
+  reconstructInFlight = false
+  outgoingStreamAborted = options.abortOutgoing === true
+  resetProgressMetricsSample()
+  logReconstructReset()
+}
+
+function scheduleOutgoingRequestTimeout(
+  set: typeof useTransferStore.setState,
+  get: typeof useTransferStore.getState
+) {
+  clearOutgoingRequestTimeout()
+  outgoingRequestTimeout = setTimeout(() => {
+    outgoingRequestTimeout = null
+    const state = get()
+    if (!state.pendingOutgoingRequest || state.mode !== "sender") return
+    get().cancelOutgoingTransferRequest()
+    set({
+      transferRejectionMessage: TRANSFER_USER_MESSAGES.requestTimedOut,
+    })
+    scheduleRejectionClear(set)
+  }, OUTGOING_REQUEST_TIMEOUT_MS)
+}
 
 function buildOutgoingFileMetadata(files: SelectedFile[]): TransferFileMetadata[] {
   return getActiveSelectedFiles(files).map((entry) => ({
@@ -284,6 +395,7 @@ function scheduleRejectionClear(set: typeof useTransferStore.setState) {
 
 const SESSION_CLEAR_FIELDS = {
   activeTransferId: "",
+  activeTransferSessionToken: "",
   transferSessionStatus: null as TransferSessionStatus | null,
   transferStartedAt: null as number | null,
   activeTransferPeer: null as TransferPeer | null,
@@ -309,9 +421,12 @@ const TRANSFER_FLOW_RESET_FIELDS = {
   perFileTransferProgress: {} as Record<string, PerFileTransferProgress>,
   perFileProgressOrder: [] as string[],
   selectedCompletedFileIds: {} as Record<string, boolean>,
+  isFinalizingTransfer: false,
+  isReconstructingFiles: false,
   incomingTransferRequest: null as IncomingTransferRequest | null,
   pendingOutgoingRequest: null as PendingOutgoingRequest | null,
   transferRejectionMessage: null as string | null,
+  transferNoticeMessage: null as string | null,
   completionSummary: null as CompletionSummary | null,
   connectionStatus: "offline" as ConnectionStatus,
   ...SESSION_CLEAR_FIELDS,
@@ -382,7 +497,11 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
   setMode: (mode) => set({ mode }),
 
   startSendFlow: () => {
-    clearRejectionTimer()
+    const previousMode = get().mode
+    resetEntireTransferLifecycle("send_flow")
+    if (previousMode === "receiver" && import.meta.env.DEV) {
+      logRoleSwap("receiver", "sender")
+    }
     console.log("[MODE] startSendFlow() → sender")
     set({
       mode: "sender",
@@ -396,6 +515,7 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
       incomingTransferRequest: null,
       pendingOutgoingRequest: null,
       transferRejectionMessage: null,
+      transferNoticeMessage: null,
       completionSummary: null,
       transferProgress: 0,
       transferSpeed: 0,
@@ -413,6 +533,11 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
   },
 
   startReceiveFlow: () => {
+    const previousMode = get().mode
+    resetEntireTransferLifecycle("receive_flow")
+    if (previousMode === "sender" && import.meta.env.DEV) {
+      logRoleSwap("sender", "receiver")
+    }
     console.log("[MODE] startReceiveFlow() → receiver")
     set({
       mode: "receiver",
@@ -421,12 +546,25 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
       transferState: "waiting",
       nearbyDevices: [],
       selectedReceiver: null,
+      completionSummary: null,
+      ...PARTIAL_TRANSFER_CLEAR,
+      ...SESSION_CLEAR_FIELDS,
     })
     get().registerDevice()
   },
 
   startDiscovery: () => {
-    clearRejectionTimer()
+    const state = get()
+    const validation = validateActiveSelection(state.selectedFiles)
+    if (!validation.valid) {
+      set({
+        transferNoticeMessage:
+          validation.errors[0] ?? TRANSFER_USER_MESSAGES.noFilesSelected,
+      })
+      return
+    }
+
+    resetEntireTransferLifecycle("discovery")
     set({
       transferState: "discovering",
       connectionStatus: "searching",
@@ -434,6 +572,8 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
       selectedReceiver: null,
       pendingOutgoingRequest: null,
       transferRejectionMessage: null,
+      transferNoticeMessage: null,
+      ...PARTIAL_TRANSFER_CLEAR,
       ...SESSION_CLEAR_FIELDS,
     })
     get().discoverReceivers()
@@ -458,18 +598,21 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
 
   applyReceiversList: (receivers) => {
     const selfSocketId = get().wsSocketId
-    const filtered = selfSocketId
-      ? receivers.filter((r) => r.socketId !== selfSocketId)
-      : receivers
-    const nearbyDevices = mapReceiversToNearbyDevices(filtered)
+    const filtered = capDiscoveryReceivers(
+      selfSocketId
+        ? receivers.filter((r) => r.socketId !== selfSocketId)
+        : receivers
+    )
+    const nearbyDevices = reconcileReceiversToNearbyDevices(filtered)
 
     if (import.meta.env.DEV) {
       console.log(`[WS] receivers_list applied: ${nearbyDevices.length}`)
     }
 
-    const currentId = get().selectedReceiver?.id
+    const currentSocketId = get().selectedReceiver?.socketId
     const stillSelected =
-      currentId && nearbyDevices.some((d) => d.id === currentId)
+      currentSocketId &&
+      nearbyDevices.some((d) => d.socketId === currentSocketId)
     const state = get()
     const keepRequesting =
       state.transferState === "requesting" && stillSelected
@@ -477,7 +620,11 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
     set({
       nearbyDevices,
       lastWsEvent: "receivers_list",
-      selectedReceiver: stillSelected ? state.selectedReceiver : null,
+      selectedReceiver: stillSelected
+        ? (nearbyDevices.find(
+            (d) => d.socketId === state.selectedReceiver?.socketId
+          ) ?? state.selectedReceiver)
+        : null,
       transferState: keepRequesting
         ? "requesting"
         : stillSelected
@@ -491,12 +638,48 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
     })
   },
 
+  refreshTrustedNearbyDevices: () => {
+    const state = get()
+    if (!state.nearbyDevices.length) return
+
+    const entries: ReceiverDiscoveryEntry[] = state.nearbyDevices.map(
+      (device) => ({
+        deviceId: device.id,
+        username: device.username,
+        socketId: device.socketId,
+        mode: "receiver",
+      })
+    )
+
+    const nearbyDevices = patchNearbyDevicesTrust(state.nearbyDevices, entries)
+    const selectedSocketId = state.selectedReceiver?.socketId
+
+    set({
+      nearbyDevices,
+      selectedReceiver: selectedSocketId
+        ? (nearbyDevices.find((d) => d.socketId === selectedSocketId) ??
+          state.selectedReceiver)
+        : state.selectedReceiver,
+    })
+  },
+
   requestTransferToReceiver: (device) => {
     const state = get()
-    if (state.mode !== "sender" || state.transferState !== "discovering") {
+    if (!canStartOutgoingRequest(state) || !device.socketId) {
       return
     }
-    if (state.wsConnectionStatus !== "connected" || !device.socketId) {
+
+    if (state.pendingOutgoingRequest?.targetSocketId === device.socketId) {
+      return
+    }
+
+    const selectionCheck = validateActiveSelection(state.selectedFiles)
+    if (!selectionCheck.valid) {
+      set({
+        transferRejectionMessage:
+          selectionCheck.errors[0] ?? TRANSFER_USER_MESSAGES.noFilesSelected,
+      })
+      scheduleRejectionClear(set)
       return
     }
 
@@ -523,9 +706,12 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
       senderDeviceId: state.deviceId,
       files,
     })
+
+    scheduleOutgoingRequestTimeout(set, get)
   },
 
   cancelOutgoingTransferRequest: () => {
+    clearOutgoingRequestTimeout()
     const state = get()
     const pending = state.pendingOutgoingRequest
 
@@ -547,9 +733,14 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
   acceptIncomingTransferRequest: () => {
     const state = get()
     const incoming = state.incomingTransferRequest
-    if (!incoming || state.mode !== "receiver") return
+    if (!canAcceptIncomingRequest(state) || !incoming) return
+    if (incomingAcceptInFlight) return
+
+    incomingAcceptInFlight = true
+    pendingAcceptRequesterSocketId = incoming.requesterSocketId
 
     set({
+      incomingTransferRequest: null,
       transferState: "connecting",
       connectionStatus: "connected",
       lastWsEvent: "transfer_accept",
@@ -564,6 +755,7 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
     const state = get()
     const incoming = state.incomingTransferRequest
     if (!incoming || state.mode !== "receiver") return
+    if (incomingAcceptInFlight) return
 
     websocketService.sendTransferReject({
       requesterSocketId: incoming.requesterSocketId,
@@ -576,11 +768,12 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
   },
 
   clearTransferRequestState: () => {
-    clearRejectionTimer()
+    resetEntireTransferLifecycle("reject")
     set({
       incomingTransferRequest: null,
       pendingOutgoingRequest: null,
       transferRejectionMessage: null,
+      ...PARTIAL_TRANSFER_CLEAR,
       ...SESSION_CLEAR_FIELDS,
     })
   },
@@ -593,6 +786,20 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
 
     if (!isSender && !isReceiver) return
 
+    const identity = buildSessionIdentity(payload, wsSocketId)
+    if (!validateAcceptedSessionIdentity(identity, wsSocketId)) {
+      if (import.meta.env.DEV) {
+        console.warn("[SESSION_GUARD] rejected transfer_request_accepted")
+      }
+      return
+    }
+
+    if (state.activeTransferId === payload.transferId) {
+      clearOutgoingRequestTimeout()
+      clearIncomingAcceptGuard()
+      return
+    }
+
     if (isSender) {
       const canAccept =
         Boolean(state.pendingOutgoingRequest) ||
@@ -600,14 +807,20 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
           state.selectedReceiver !== null)
       if (!canAccept) return
     } else if (isReceiver) {
-      const incoming = state.incomingTransferRequest
+      const expectedRequester =
+        pendingAcceptRequesterSocketId ??
+        state.incomingTransferRequest?.requesterSocketId
       if (
-        incoming &&
-        incoming.requesterSocketId !== payload.senderSocketId
+        expectedRequester &&
+        expectedRequester !== payload.senderSocketId
       ) {
         return
       }
     }
+
+    clearOutgoingRequestTimeout()
+    clearIncomingAcceptGuard()
+    resetEntireTransferLifecycle("transfer_accepted")
 
     const peer: TransferPeer = isSender
       ? {
@@ -622,35 +835,106 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
         }
 
     set({
+      ...PARTIAL_TRANSFER_CLEAR,
       pendingOutgoingRequest: null,
       incomingTransferRequest: null,
       transferState: "connecting",
       connectionStatus: "connected",
       activeTransferId: payload.transferId,
+      activeTransferSessionToken: payload.sessionToken,
       transferSessionStatus: "connecting",
       transferStartedAt: Date.now(),
       activeTransferPeer: peer,
-      incomingFilesMetadata: isReceiver ? payload.files : state.incomingFilesMetadata,
+      incomingFilesMetadata: isReceiver ? payload.files : [],
       activeTransferTotalBytes: payload.totalBytes,
       bytesTransferred: 0,
-      incomingFileChunks: {},
       receivedFilesMemory: {},
       perFileTransferProgress: {},
       perFileProgressOrder: [],
       selectedCompletedFileIds: {},
       transferRejectionMessage: null,
+      transferNoticeMessage: null,
+      isFinalizingTransfer: false,
+      isReconstructingFiles: false,
       lastWsEvent: "transfer_request_accepted",
     })
+
+    if (import.meta.env.DEV) {
+      logSessionReleased()
+      console.log(
+        `[SESSION] New transfer ${payload.transferId.slice(0, 8)}… role=${isSender ? "sender" : "receiver"}`
+      )
+    }
   },
 
   applyTransferSessionClosed: (payload: TransferSessionClosedPayload) => {
     const state = get()
-    if (!state.activeTransferId || state.activeTransferId !== payload.transferId) {
+    if (
+      shouldRejectTransferEvent(
+        {
+          activeTransferId: state.activeTransferId,
+          activeTransferSessionToken: state.activeTransferSessionToken,
+          wsSocketId: state.wsSocketId,
+          mode: state.mode,
+        },
+        payload.transferId
+      )
+    ) {
       return
     }
-    transferCompleteSentForId = ""
+    resetEntireTransferLifecycle("session_closed", { abortOutgoing: true })
+    logSessionReleased(payload.transferId)
+
+    const message = humanizeCloseReason(payload.reason)
+    const isSender = state.mode === "sender"
+
     get().exitActiveTransferSession()
-    set({ lastWsEvent: "transfer_session_closed" })
+    set({
+      lastWsEvent: "transfer_session_closed",
+      transferRejectionMessage: isSender ? message : null,
+      transferNoticeMessage: !isSender ? message : null,
+    })
+    if (isSender) {
+      scheduleRejectionClear(set)
+    }
+  },
+
+  abortActiveTransferSession: (userMessage) => {
+    const state = get()
+    if (!state.activeTransferId) return
+
+    resetEntireTransferLifecycle("abort", { abortOutgoing: true })
+    logSessionReleased(state.activeTransferId)
+
+    if (state.wsConnectionStatus === "connected" && state.activeTransferSessionToken) {
+      websocketService.sendTransferAbort({
+        transferId: state.activeTransferId,
+        sessionToken: state.activeTransferSessionToken,
+      })
+    }
+
+    const isSender = state.mode === "sender"
+    const message = userMessage ?? TRANSFER_USER_MESSAGES.transferCancelled
+
+    set({
+      ...PARTIAL_TRANSFER_CLEAR,
+      completionSummary: null,
+      ...SESSION_CLEAR_FIELDS,
+      incomingTransferRequest: null,
+      pendingOutgoingRequest: null,
+      transferState: isSender ? "discovering" : "waiting",
+      connectionStatus: "searching",
+      selectedReceiver: isSender ? null : state.selectedReceiver,
+      discoverable: isSender ? state.discoverable : true,
+      transferRejectionMessage: isSender ? message : null,
+      transferNoticeMessage: !isSender ? message : null,
+      lastWsEvent: "transfer_abort",
+    })
+
+    if (isSender) {
+      get().discoverReceivers()
+      scheduleRejectionClear(set)
+    }
   },
 
   applyTransferSessionFailed: (payload: TransferSessionFailedPayload) => {
@@ -658,7 +942,7 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
     if (!state.activeTransferId || state.activeTransferId !== payload.transferId) {
       return
     }
-    transferCompleteSentForId = ""
+    resetEntireTransferLifecycle("failed", { abortOutgoing: true })
     get().exitActiveTransferSession()
     set({
       transferState: "failed",
@@ -680,8 +964,12 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
     }
     if (transferCompleteSentForId === activeTransferId) return
 
+    const sessionToken = get().activeTransferSessionToken
+    if (!sessionToken) return
+
     const sent = websocketService.sendTransferComplete({
       transferId: activeTransferId,
+      sessionToken,
     })
 
     if (sent) {
@@ -692,8 +980,49 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
 
   applyTransferMetadata: (payload) => {
     const state = get()
-    if (payload.transferId !== state.activeTransferId) return
     if (state.mode !== "receiver") return
+    if (
+      shouldRejectTransferEvent(
+        {
+          activeTransferId: state.activeTransferId,
+          activeTransferSessionToken: state.activeTransferSessionToken,
+          wsSocketId: state.wsSocketId,
+          mode: state.mode,
+        },
+        payload.transferId,
+        payload.sessionToken
+      )
+    ) {
+      return
+    }
+    if (
+      shouldIgnoreStaleTransferId(
+        {
+          activeTransferId: state.activeTransferId,
+          transferSessionStatus: state.transferSessionStatus,
+        },
+        payload.transferId
+      )
+    ) {
+      return
+    }
+    if (
+      !canProcessTransferMetadata({
+        activeTransferId: state.activeTransferId,
+        transferSessionStatus: state.transferSessionStatus,
+      })
+    ) {
+      return
+    }
+
+    const metadataCheck = validateTransferMetadata(payload, state.activeTransferId)
+    if (!metadataCheck.valid) {
+      if (import.meta.env.DEV) {
+        console.warn("[GUARD] metadata rejected:", metadataCheck.reason)
+      }
+      get().abortActiveTransferSession(TRANSFER_USER_MESSAGES.invalidMetadata)
+      return
+    }
 
     resetProgressMetricsSample()
 
@@ -732,6 +1061,14 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
     const { perFileTransferProgress, perFileProgressOrder } =
       buildInitialPerFileProgress(metadataFiles)
 
+    const nextStatus = "transferring" as const
+    if (
+      state.transferSessionStatus &&
+      !canApplySessionStatus(state.transferSessionStatus, nextStatus)
+    ) {
+      return
+    }
+
     set({
       incomingFilesMetadata,
       incomingFileChunks,
@@ -742,7 +1079,7 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
       transferProgress: 0,
       transferSpeed: 0,
       estimatedTimeRemaining: 0,
-      transferSessionStatus: "transferring",
+      transferSessionStatus: nextStatus,
       transferState: "transferring",
       lastWsEvent: "transfer_metadata",
     })
@@ -750,9 +1087,51 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
 
   applyFileChunk: (chunk) => {
     if (!chunk) return
+    if (reconstructInFlight) return
 
     const state = get()
-    if (chunk.transferId !== state.activeTransferId || state.mode !== "receiver") {
+    if (state.mode !== "receiver") return
+    if (
+      shouldRejectTransferEvent(
+        {
+          activeTransferId: state.activeTransferId,
+          activeTransferSessionToken: state.activeTransferSessionToken,
+          wsSocketId: state.wsSocketId,
+          mode: state.mode,
+        },
+        chunk.transferId
+      )
+    ) {
+      return
+    }
+    if (
+      shouldIgnoreStaleTransferId(
+        {
+          activeTransferId: state.activeTransferId,
+          transferSessionStatus: state.transferSessionStatus,
+        },
+        chunk.transferId
+      )
+    ) {
+      return
+    }
+    if (
+      !canProcessFileChunk({
+        activeTransferId: state.activeTransferId,
+        transferSessionStatus: state.transferSessionStatus,
+      })
+    ) {
+      return
+    }
+
+    const chunkCheck = validateIncomingChunk(chunk, {
+      activeTransferId: state.activeTransferId,
+      incomingFileChunks: state.incomingFileChunks,
+    })
+    if (!chunkCheck.valid) {
+      if (import.meta.env.DEV) {
+        console.warn("[GUARD] chunk rejected:", chunkCheck.reason)
+      }
       return
     }
 
@@ -803,60 +1182,107 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
     })
 
     if (Object.values(incomingFileChunks).every((entry) => entry.completed)) {
-      get().reconstructReceivedFiles()
+      get().scheduleReconstructReceivedFiles()
     }
+  },
+
+  scheduleReconstructReceivedFiles: () => {
+    const state = get()
+    if (state.mode !== "receiver") return
+    if (reconstructInFlight) return
+
+    const showOverlay = shouldShowFinalizingOverlay(
+      state.activeTransferTotalBytes,
+      state.incomingFileChunks
+    )
+
+    if (showOverlay) {
+      set({
+        isFinalizingTransfer: true,
+        isReconstructingFiles: true,
+        transferProgress: 100,
+        transferSessionStatus: "reconstructing",
+        transferState: "transferring",
+        transferSpeed: 0,
+        estimatedTimeRemaining: 0,
+      })
+      scheduleAfterOverlayPaint(() => get().reconstructReceivedFiles())
+      return
+    }
+
+    requestAnimationFrame(() => get().reconstructReceivedFiles())
   },
 
   reconstructReceivedFiles: () => {
     const state = get()
     if (state.mode !== "receiver") return
+    if (reconstructInFlight) return
+    if (!state.activeTransferId) return
 
-    set({
-      transferSessionStatus: "reconstructing",
-      transferState: "transferring",
-    })
+    reconstructInFlight = true
 
-    const receivedFilesMemory: Record<string, ReceivedFileMemory> = {}
-
-    for (const [fileId, entry] of Object.entries(state.incomingFileChunks)) {
-      const parts = entry.chunks.filter((part): part is Uint8Array => part !== null)
-      const blob = new Blob(parts as BlobPart[], {
-        type: entry.metadata.type || "application/octet-stream",
+    try {
+      set({
+        transferSessionStatus: "reconstructing",
+        transferState: "transferring",
       })
-      receivedFilesMemory[fileId] = {
-        fileId,
-        name: entry.metadata.name,
-        size: entry.metadata.size,
-        type: entry.metadata.type,
-        receivedBytes: entry.receivedBytes,
-        completed: true,
-        blob,
+
+      const receivedFilesMemory: Record<string, ReceivedFileMemory> = {}
+
+      for (const [fileId, entry] of Object.entries(state.incomingFileChunks)) {
+        const parts = entry.chunks.filter(
+          (part): part is Uint8Array => part !== null
+        )
+        const blob = new Blob(parts as BlobPart[], {
+          type: entry.metadata.type || "application/octet-stream",
+        })
+        parts.length = 0
+        entry.chunks.length = 0
+        receivedFilesMemory[fileId] = {
+          fileId,
+          name: entry.metadata.name,
+          size: entry.metadata.size,
+          type: entry.metadata.type,
+          receivedBytes: entry.receivedBytes,
+          completed: true,
+          blob,
+        }
       }
-    }
 
-    const perFileTransferProgress = { ...state.perFileTransferProgress }
-    for (const fileId of state.perFileProgressOrder) {
-      const entry = perFileTransferProgress[fileId]
-      if (!entry) continue
-      perFileTransferProgress[fileId] = {
-        ...entry,
-        transferredBytes: entry.totalBytes,
-        percentage: 100,
-        status: "completed",
+      const perFileTransferProgress = { ...state.perFileTransferProgress }
+      for (const fileId of state.perFileProgressOrder) {
+        const entry = perFileTransferProgress[fileId]
+        if (!entry) continue
+        perFileTransferProgress[fileId] = {
+          ...entry,
+          transferredBytes: entry.totalBytes,
+          percentage: 100,
+          status: "completed",
+        }
       }
+
+      set({
+        receivedFilesMemory,
+        incomingFileChunks: {},
+        perFileTransferProgress,
+        transferProgress: 100,
+        bytesTransferred: state.activeTransferTotalBytes,
+        transferSpeed: 0,
+        estimatedTimeRemaining: 0,
+        isFinalizingTransfer: false,
+        isReconstructingFiles: false,
+      })
+
+      if (import.meta.env.DEV) {
+        console.log(
+          `[RECONSTRUCT_RESET] assembled ${Object.keys(receivedFilesMemory).length} file(s)`
+        )
+      }
+
+      get().notifyTransferComplete()
+    } finally {
+      reconstructInFlight = false
     }
-
-    set({
-      receivedFilesMemory,
-      incomingFileChunks: {},
-      perFileTransferProgress,
-      transferProgress: 100,
-      bytesTransferred: state.activeTransferTotalBytes,
-      transferSpeed: 0,
-      estimatedTimeRemaining: 0,
-    })
-
-    get().notifyTransferComplete()
   },
 
   downloadAllReceivedFiles: () => {
@@ -884,6 +1310,7 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
   startOutgoingFileTransfer: async () => {
     const state = get()
     if (state.mode !== "sender" || !state.activeTransferId) return
+    if (!state.activeTransferSessionToken) return
     if (state.transferSessionStatus !== "connecting" || outgoingTransferInFlight) {
       return
     }
@@ -891,7 +1318,18 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
     const activeFiles = getActiveSelectedFiles(state.selectedFiles)
     if (activeFiles.length === 0) return
 
+    const selectionCheck = validateActiveSelection(state.selectedFiles)
+    if (!selectionCheck.valid) {
+      set({
+        transferRejectionMessage:
+          selectionCheck.errors[0] ?? TRANSFER_USER_MESSAGES.noFilesSelected,
+      })
+      scheduleRejectionClear(set)
+      return
+    }
+
     outgoingTransferInFlight = true
+    outgoingStreamAborted = false
     resetProgressMetricsSample()
 
     const outgoing = buildOutgoingTransferFiles(activeFiles.map((entry) => entry.file))
@@ -919,6 +1357,7 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
 
     const metadataSent = websocketService.sendTransferMetadata({
       transferId: state.activeTransferId,
+      sessionToken: state.activeTransferSessionToken,
       files: toMetadataEntries(outgoing),
       totalBytes,
     })
@@ -933,10 +1372,12 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
       lastWsEvent: "transfer_metadata",
     })
 
-    await streamOutgoingFiles(
+    const streamResult = await streamOutgoingFiles(
       state.activeTransferId,
       outgoing,
       ({ bytesSent, totalBytes, fileId, fileBytesSent }) => {
+        if (outgoingStreamAborted || !get().activeTransferId) return
+
         const metrics = computeTransferMetrics(bytesSent, totalBytes)
         const current = get()
         set({
@@ -953,10 +1394,18 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
             fileBytesSent
           ),
         })
+      },
+      {
+        shouldAbort: () =>
+          outgoingStreamAborted || !get().activeTransferId,
       }
     )
 
     outgoingTransferInFlight = false
+
+    if (streamResult === "aborted" || outgoingStreamAborted) {
+      return
+    }
   },
 
   setCompletionSummary: (summary) => set({ completionSummary: summary }),
@@ -966,6 +1415,17 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
   finalizeLocalTransferSession: () => {
     const state = get()
     const isSender = state.mode === "sender"
+    const peer = state.activeTransferPeer
+    const transferId = state.activeTransferId
+
+    if (peer?.deviceId) {
+      incrementInteractionCount(peer.deviceId, peer.username, transferId)
+      enqueueTrustSuggestion(
+        peer.deviceId,
+        peer.username,
+        isSender ? "sender" : "receiver"
+      )
+    }
     const completionSummary = buildCompletionSnapshot(state)
 
     const selectedCompletedFileIds: Record<string, boolean> = {}
@@ -975,7 +1435,12 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
       }
     }
 
-    transferCompleteSentForId = ""
+    if (transferId) {
+      logTransferFinalized(transferId, isSender ? "sender" : "receiver")
+      logSessionReleased(transferId)
+    }
+
+    resetEntireTransferLifecycle("finalize", { abortOutgoing: true })
 
     set({
       completionSummary,
@@ -985,6 +1450,8 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
       incomingTransferRequest: null,
       pendingOutgoingRequest: null,
       transferRejectionMessage: null,
+      isFinalizingTransfer: false,
+      isReconstructingFiles: false,
       transferProgress: 100,
       transferState: "completed",
       connectionStatus: "searching",
@@ -995,10 +1462,31 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
 
   applyTransferSessionCompleted: (payload: TransferSessionCompletedPayload) => {
     const state = get()
+    if (state.transferState === "completed" && state.completionSummary) {
+      if (import.meta.env.DEV) {
+        console.log("[SESSION_GUARD] transfer_session_completed ignored (already finalized)")
+      }
+      return
+    }
+
     if (
-      state.activeTransferId &&
-      state.activeTransferId !== payload.transferId
+      shouldRejectTransferEvent(
+        {
+          activeTransferId: state.activeTransferId,
+          activeTransferSessionToken: state.activeTransferSessionToken,
+          wsSocketId: state.wsSocketId,
+          mode: state.mode,
+        },
+        payload.transferId,
+        payload.sessionToken
+      )
     ) {
+      if (import.meta.env.DEV) {
+        console.warn(
+          "[SESSION_GUARD] rejected transfer_session_completed",
+          payload.transferId.slice(0, 8)
+        )
+      }
       return
     }
 
@@ -1007,17 +1495,26 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
   },
 
   resetTransferFlow: () => {
-    const previousMode = get().mode
-    clearRejectionTimer()
-    transferCompleteSentForId = ""
-    outgoingTransferInFlight = false
-    resetProgressMetricsSample()
+    const state = get()
+    const previousMode = state.mode
+    if (
+      state.activeTransferId &&
+      state.activeTransferSessionToken &&
+      state.wsConnectionStatus === "connected"
+    ) {
+      websocketService.sendTransferAbort({
+        transferId: state.activeTransferId,
+        sessionToken: state.activeTransferSessionToken,
+      })
+    }
+    resetEntireTransferLifecycle("reset", { abortOutgoing: true })
     console.log("[RESET] resetTransferFlow()", {
       previousMode,
       nextMode: "idle",
     })
     set({
       ...TRANSFER_FLOW_RESET_FIELDS,
+      ...PARTIAL_TRANSFER_CLEAR,
       registeredMode: "none",
     })
   },
@@ -1030,16 +1527,13 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
     const state = get()
     const isSender = state.mode === "sender"
 
-    transferCompleteSentForId = ""
-    clearRejectionTimer()
+    resetEntireTransferLifecycle("exit", { abortOutgoing: true })
     set({
+      ...PARTIAL_TRANSFER_CLEAR,
       completionSummary: null,
       ...SESSION_CLEAR_FIELDS,
       incomingTransferRequest: null,
       pendingOutgoingRequest: null,
-      transferProgress: 0,
-      transferSpeed: 0,
-      estimatedTimeRemaining: 0,
       transferState: isSender ? "discovering" : "waiting",
       connectionStatus: "searching",
       selectedReceiver: isSender ? null : state.selectedReceiver,
@@ -1060,7 +1554,9 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
       return
     }
 
-    const message = payload.reason ?? "Receiver declined your request"
+    clearOutgoingRequestTimeout()
+
+    const message = humanizeRejectReason(payload.reason)
 
     set({
       pendingOutgoingRequest: null,
@@ -1095,7 +1591,7 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
         get().registerDevice()
       },
       onClose: () => {
-        clearRejectionTimer()
+        resetEntireTransferLifecycle("ws_close", { abortOutgoing: true })
         const state = get()
         const hadActiveSession = Boolean(state.activeTransferId)
         const wasRequesting = state.transferState === "requesting"
@@ -1107,6 +1603,8 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
           incomingTransferRequest: null,
           pendingOutgoingRequest: null,
           transferRejectionMessage: null,
+          transferNoticeMessage: null,
+          ...PARTIAL_TRANSFER_CLEAR,
           ...SESSION_CLEAR_FIELDS,
           transferState: wasRequesting
             ? "discovering"
@@ -1140,6 +1638,9 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
       },
       onRegistered: (mode) => {
         set({ registeredMode: mode, lastWsEvent: "registered" })
+      },
+      onServerNotice: (message) => {
+        set({ transferNoticeMessage: message })
       },
       onReceiversList: (receivers) => {
         get().applyReceiversList(receivers)
@@ -1212,8 +1713,13 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
       onTransferRequestCancelled: () => {
         const state = get()
         if (state.mode !== "receiver") return
+        clearIncomingAcceptGuard()
         set({
           incomingTransferRequest: null,
+          transferState: state.activeTransferId ? state.transferState : "waiting",
+          connectionStatus: state.activeTransferId
+            ? state.connectionStatus
+            : "searching",
           lastWsEvent: "transfer_request_cancelled",
         })
       },
@@ -1298,15 +1804,37 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
   },
 
   addFiles: (incoming) => {
-    const newEntries: SelectedFile[] = incoming.map((file) => ({
-      id: `${file.name}-${file.size}-${crypto.randomUUID()}`,
-      file,
-      selected: true,
-    }))
-    const selectedFiles = [...get().selectedFiles, ...newEntries]
+    if (incoming.length === 0) return
+
+    const state = get()
+    const existingFiles = state.selectedFiles.map((entry) => entry.file)
+    const validation = validateFilesToAdd(existingFiles, incoming)
+
+    const existingKeys = new Set(
+      existingFiles.map((f) => `${f.name}\0${f.size}\0${f.lastModified}`)
+    )
+
+    const newEntries: SelectedFile[] = validation.acceptedFiles
+      .filter((file) => !existingKeys.has(`${file.name}\0${file.size}\0${file.lastModified}`))
+      .map((file) => ({
+        id: `${file.name}-${file.size}-${crypto.randomUUID()}`,
+        file,
+        selected: true,
+      }))
+
+    const selectedFiles = [...state.selectedFiles, ...newEntries]
+
+    let notice: string | null = null
+    if (validation.errors.length > 0) {
+      notice = validation.errors[0]
+    } else if (validation.rejected.length > 0) {
+      notice = validation.rejected[0].reason
+    }
+
     set({
       selectedFiles,
       totalTransferSize: computeTotalTransferSize(selectedFiles),
+      transferNoticeMessage: notice,
     })
   },
 
@@ -1349,7 +1877,8 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
         targetSocketId: pending.targetSocketId,
       })
     }
-    clearRejectionTimer()
+    resetEntireTransferLifecycle("reset", { abortOutgoing: true })
+    clearDiscoveryLayoutRegistry()
     set({
       nearbyDevices: [],
       selectedReceiver: null,
@@ -1358,6 +1887,7 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
       incomingTransferRequest: null,
       pendingOutgoingRequest: null,
       transferRejectionMessage: null,
+      ...PARTIAL_TRANSFER_CLEAR,
       ...SESSION_CLEAR_FIELDS,
     })
   },
@@ -1376,15 +1906,19 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
   },
 
   exitTransferToDiscovery: () => {
-    clearRejectionTimer()
+    if (get().activeTransferId) {
+      get().abortActiveTransferSession()
+      return
+    }
+
+    resetEntireTransferLifecycle("exit", { abortOutgoing: true })
     set({
       selectedReceiver: null,
-      transferProgress: 0,
-      transferSpeed: 0,
-      estimatedTimeRemaining: 0,
       incomingTransferRequest: null,
       pendingOutgoingRequest: null,
       transferRejectionMessage: null,
+      transferNoticeMessage: null,
+      ...PARTIAL_TRANSFER_CLEAR,
       ...SESSION_CLEAR_FIELDS,
       transferState: "discovering",
       connectionStatus: "searching",
@@ -1399,7 +1933,7 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
         requesterSocketId: incoming.requesterSocketId,
       })
     }
-    clearRejectionTimer()
+    resetEntireTransferLifecycle("exit", { abortOutgoing: true })
     set({
       mode: "idle",
       discoverable: false,
@@ -1410,14 +1944,17 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
       incomingTransferRequest: null,
       pendingOutgoingRequest: null,
       transferRejectionMessage: null,
+      ...PARTIAL_TRANSFER_CLEAR,
       ...SESSION_CLEAR_FIELDS,
     })
     get().registerDevice()
   },
 
   resetTransferSession: () => {
+    resetEntireTransferLifecycle("reset", { abortOutgoing: true })
     set({
       ...initialTransferSession,
+      ...PARTIAL_TRANSFER_CLEAR,
     })
     get().registerDevice()
   },
@@ -1487,6 +2024,16 @@ export const selectPendingOutgoingRequest = (state: TransferStoreState) =>
   state.pendingOutgoingRequest
 export const selectTransferRejectionMessage = (state: TransferStoreState) =>
   state.transferRejectionMessage
+export const selectTransferNoticeMessage = (state: TransferStoreState) =>
+  state.transferNoticeMessage
+export const selectIsFinalizingTransfer = (state: TransferStoreState) =>
+  state.isFinalizingTransfer
+export const selectIsReconstructingFiles = (state: TransferStoreState) =>
+  state.isReconstructingFiles
+export const selectShowFinalizingOverlay = (state: TransferStoreState) =>
+  state.mode === "receiver" &&
+  state.isFinalizingTransfer &&
+  state.completionSummary === null
 export const selectActiveTransferPeer = (state: TransferStoreState) =>
   state.activeTransferPeer
 export const selectActiveTransferPeerUsername = (state: TransferStoreState) =>
@@ -1499,6 +2046,8 @@ export const selectActiveTransferId = (state: TransferStoreState) =>
   state.activeTransferId
 export const selectTransferSessionStatus = (state: TransferStoreState) =>
   state.transferSessionStatus ?? ""
+export const selectCanRequestTransfer = (state: TransferStoreState) =>
+  canStartOutgoingRequest(state)
 export const selectHasActiveTransferSession = (state: TransferStoreState) =>
   state.activeTransferId !== ""
 export const selectTransferStartedAt = (state: TransferStoreState) =>
@@ -1526,6 +2075,8 @@ export const selectResetTransferSession = (state: TransferStoreState) =>
   state.resetTransferSession
 export const selectResetDiscovery = (state: TransferStoreState) =>
   state.resetDiscovery
+export const selectRefreshTrustedNearbyDevices = (state: TransferStoreState) =>
+  state.refreshTrustedNearbyDevices
 export const selectResetTransferProgress = (state: TransferStoreState) =>
   state.resetTransferProgress
 export const selectExitTransferToDiscovery = (state: TransferStoreState) =>

@@ -1,9 +1,12 @@
 import { useCallback, useRef } from "react"
 import { motion } from "framer-motion"
 import { useNavigate } from "react-router-dom"
+import { FileDragAtmosphere } from "@/components/files/FileDragAtmosphere"
+import { FileDropOverlay } from "@/components/files/FileDropOverlay"
 import { BackButton } from "@/components/shared/BackButton"
 import { FileCard } from "@/components/shared/FileCard"
 import { GlowButton } from "@/components/shared/GlowButton"
+import { useFileDragState } from "@/hooks/useFileDragState"
 import {
   selectAddFiles,
   selectHasFileSelection,
@@ -11,6 +14,7 @@ import {
   selectStartDiscovery,
   selectToggleFile,
   selectTotalTransferSize,
+  selectTransferNoticeMessage,
   useTransferStore,
 } from "@/store/useTransferStore"
 import { formatFileSize } from "@/lib/format"
@@ -25,6 +29,7 @@ export function SelectFilesPage() {
   const addFiles = useTransferStore(selectAddFiles)
   const toggleFile = useTransferStore(selectToggleFile)
   const startDiscovery = useTransferStore(selectStartDiscovery)
+  const noticeMessage = useTransferStore(selectTransferNoticeMessage)
 
   const handleFiles = useCallback(
     (fileList: FileList | null) => {
@@ -34,13 +39,10 @@ export function SelectFilesPage() {
     [addFiles]
   )
 
-  const onDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault()
-      handleFiles(e.dataTransfer.files)
-    },
-    [handleFiles]
-  )
+  const { isDragActive, dropFlash, containerRef, dragHandlers } =
+    useFileDragState({
+      onFilesDropped: handleFiles,
+    })
 
   const handleContinue = () => {
     if (!hasSelection) return
@@ -49,10 +51,16 @@ export function SelectFilesPage() {
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div
+      ref={containerRef}
+      className="relative flex h-full min-h-0 flex-col"
+      {...dragHandlers}
+    >
+      <FileDragAtmosphere active={isDragActive} />
+
       <BackButton to="/" />
 
-      <header className="mt-2 text-center">
+      <header className="relative z-[1] mt-2 text-center">
         <h1 className="text-xl font-semibold text-white">Select Files</h1>
         <p className="mt-1 text-sm text-white/45">
           Choose what you want to send
@@ -64,18 +72,34 @@ export function SelectFilesPage() {
         tabIndex={0}
         onClick={() => inputRef.current?.click()}
         onKeyDown={(e) => e.key === "Enter" && inputRef.current?.click()}
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={onDrop}
         className={cn(
-          "glass-panel mt-6 flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-cyan-500/25 px-6 py-10 transition-colors",
-          "hover:border-cyan-400/40 hover:bg-cyan-500/5"
+          "relative z-[1] mt-6 flex cursor-pointer flex-col items-center justify-center overflow-hidden rounded-2xl border-2 border-dashed px-6 py-10",
+          "border-[rgba(255,255,255,0.12)] bg-[rgba(255,255,255,0.02)]",
+          "transition-[border-color,background-color,box-shadow] duration-300 ease-out",
+          "hover:border-[rgba(255,255,255,0.18)] hover:bg-[rgba(255,255,255,0.035)]",
+          isDragActive && "neardrop-drop-zone-active neardrop-drop-zone-glow",
+          dropFlash && "neardrop-drop-zone-success"
         )}
-        whileHover={{ scale: 1.005 }}
+        animate={{
+          scale: dropFlash ? 1.008 : 1,
+        }}
+        transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+        whileHover={isDragActive ? undefined : { scale: 1.005 }}
       >
-        <p className="text-base font-medium text-white/80">
-          Drag & Drop Files Here
-        </p>
-        <p className="mt-1.5 text-sm text-white/40">or Click to Browse</p>
+        <FileDropOverlay visible={isDragActive} />
+
+        <div
+          className={cn(
+            "relative z-[1] text-center transition-opacity duration-300",
+            isDragActive && "opacity-0"
+          )}
+        >
+          <p className="text-base font-medium text-white/80">
+            Drag & Drop Files Here
+          </p>
+          <p className="mt-1.5 text-sm text-white/40">or Click to Browse</p>
+        </div>
+
         <input
           ref={inputRef}
           type="file"
@@ -89,7 +113,7 @@ export function SelectFilesPage() {
       </motion.div>
 
       {files.length > 0 && (
-        <div className="mt-4 min-h-0 flex-1 overflow-y-auto scrollbar-thin">
+        <div className="relative z-[1] mt-4 min-h-0 flex-1 overflow-y-auto scrollbar-thin">
           <div className="flex flex-col gap-2 pb-2">
             {files.map((f) => (
               <FileCard
@@ -104,7 +128,13 @@ export function SelectFilesPage() {
         </div>
       )}
 
-      <div className="mt-4 shrink-0 pb-1">
+      {noticeMessage && (
+        <p className="relative z-[1] mt-3 text-center text-xs text-amber-300/90">
+          {noticeMessage}
+        </p>
+      )}
+
+      <div className="relative z-[1] mt-4 shrink-0 pb-1">
         <GlowButton onClick={handleContinue} disabled={!hasSelection}>
           {hasSelection
             ? `Continue · ${formatFileSize(totalTransferSize)}`

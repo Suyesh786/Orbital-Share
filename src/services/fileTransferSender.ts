@@ -39,19 +39,26 @@ export type OutgoingChunkProgress = {
   fileTotalBytes: number
 }
 
+export type StreamOutgoingResult = "completed" | "aborted" | "failed"
+
 export async function streamOutgoingFiles(
   transferId: string,
   files: OutgoingTransferFile[],
-  onProgress: (progress: OutgoingChunkProgress) => void
-): Promise<boolean> {
+  onProgress: (progress: OutgoingChunkProgress) => void,
+  options?: { shouldAbort?: () => boolean }
+): Promise<StreamOutgoingResult> {
   const totalBytes = files.reduce((sum, entry) => sum + entry.size, 0)
   let bytesSent = 0
 
   for (const entry of files) {
+    if (options?.shouldAbort?.()) return "aborted"
+
     const totalChunks = getChunkCountForFileSize(entry.size)
     let fileBytesSent = 0
 
     for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+      if (options?.shouldAbort?.()) return "aborted"
+
       const chunkData = await readFileChunk(entry.file, chunkIndex)
 
       const packet = encodeFileChunk(
@@ -65,7 +72,7 @@ export async function streamOutgoingFiles(
       )
 
       const sent = websocketService.sendBinary(packet)
-      if (!sent) return false
+      if (!sent) return "failed"
 
       bytesSent += chunkData.byteLength
       fileBytesSent += chunkData.byteLength
@@ -80,7 +87,7 @@ export async function streamOutgoingFiles(
     }
   }
 
-  return true
+  return "completed"
 }
 
 export function buildOutgoingTransferFiles(

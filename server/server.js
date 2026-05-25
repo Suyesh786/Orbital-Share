@@ -1,7 +1,8 @@
 import { createServer } from "node:http"
 import cors from "cors"
 import { WebSocketServer } from "ws"
-import { registerSocketHandlers } from "./websocketHandlers.js"
+import { tryAcceptWebSocketConnection } from "./websocketHandlers.js"
+import { startBackgroundCleanupSweep } from "./backgroundCleanup.js"
 
 const PORT = 8080
 const httpServer = createServer((req, res) => {
@@ -14,7 +15,7 @@ const httpServer = createServer((req, res) => {
 const wss = new WebSocketServer({ server: httpServer })
 
 wss.on("connection", (ws) => {
-  registerSocketHandlers(ws)
+  tryAcceptWebSocketConnection(ws)
 })
 
 wss.on("error", (error) => {
@@ -22,5 +23,6 @@ wss.on("error", (error) => {
 })
 
 httpServer.listen(PORT, () => {
+  startBackgroundCleanupSweep()
   console.log(`[WS] Orbital Share server listening on ws://localhost:${PORT}`)
 })

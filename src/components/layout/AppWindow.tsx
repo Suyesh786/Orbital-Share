@@ -1,6 +1,9 @@
 import type { ReactNode } from "react"
+import { useLocation } from "react-router-dom"
 import { DevSessionPanel } from "@/components/debug/DevSessionPanel"
+import { TrustInboxLayer } from "@/components/trust/TrustInboxLayer"
 import { UserProfile } from "@/components/profile/UserProfile"
+import { NearDropMark } from "@/components/shared/NearDropMark"
 import { BackgroundGlow } from "./BackgroundGlow"
 import { TrafficLights } from "./TrafficLights"
 
@@ -12,9 +15,12 @@ interface AppWindowProps {
 }
 
 export function AppWindow({ children }: AppWindowProps) {
+  const { pathname } = useLocation()
+  const isHome = pathname === "/"
+
   return (
     <div
-      className="relative overflow-hidden rounded-2xl border border-white/[0.08] bg-orbital-bg shadow-[0_24px_80px_rgba(0,0,0,0.6),0_0_1px_rgba(255,255,255,0.1)_inset]"
+      className="relative overflow-hidden rounded-2xl border border-white/[0.07] bg-[#08090c] shadow-[0_20px_64px_rgba(0,0,0,0.55),0_0_1px_rgba(255,255,255,0.08)_inset]"
       style={{
         width: WINDOW_WIDTH,
         height: WINDOW_HEIGHT,
@@ -23,31 +29,43 @@ export function AppWindow({ children }: AppWindowProps) {
       }}
     >
       <div
-        className="absolute inset-0 bg-gradient-to-br from-orbital-navy/80 via-orbital-bg to-[#060810]"
+        className="absolute inset-0 bg-[radial-gradient(ellipse_90%_80%_at_50%_0%,#141c28_0%,#0c1018_50%,#07080c_100%)]"
         aria-hidden
       />
-      <BackgroundGlow />
+      {!isHome ? <BackgroundGlow /> : null}
 
       <div className="relative z-10 flex h-full flex-col">
         <div className="pointer-events-none absolute top-3.5 right-5 z-30">
-          <div className="pointer-events-auto">
+          <div className="pointer-events-auto flex items-center gap-2">
+            <TrustInboxLayer />
             <UserProfile />
           </div>
         </div>
 
-        <header className="flex shrink-0 items-center gap-3 px-5 pt-4 pb-2">
+        <header className="flex shrink-0 items-center gap-3 px-5 pt-4 pb-1">
           <TrafficLights />
-          <span className="flex-1 text-center text-[11px] font-medium tracking-wide text-white/30">
-            Orbital Share
-          </span>
+          <div className="flex flex-1 items-center justify-center gap-2">
+            {isHome ? (
+              <>
+                <NearDropMark size={14} />
+                <span className="text-[11px] font-medium tracking-[0.14em] text-white/30 uppercase">
+                  NearDrop
+                </span>
+              </>
+            ) : (
+              <span className="text-[11px] font-medium tracking-wide text-white/28">
+                NearDrop
+              </span>
+            )}
+          </div>
           <div className="w-[52px]" aria-hidden />
         </header>
 
-        <main className="relative min-h-0 flex-1 overflow-hidden px-6 pb-6">
+        <main className="relative min-h-0 flex-1 overflow-hidden px-6 pb-5">
           {children}
         </main>
 
-        <DevSessionPanel />
+        {import.meta.env.DEV ? <DevSessionPanel /> : null}
       </div>
     </div>
   )

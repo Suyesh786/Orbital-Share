@@ -1,18 +1,29 @@
 import { getReceivers, getSenders } from "./deviceRegistry.js"
+import { MAX_DISCOVERY_RECEIVERS_RETURNED } from "./productionLimits.js"
 
 /**
  * @param {string} requesterSocketId
  * @returns {Array<{ deviceId: string, username: string, socketId: string, mode: 'receiver' }>}
  */
 export function buildReceiversListFor(requesterSocketId) {
-  return getReceivers()
-    .filter((client) => client.socketId !== requesterSocketId)
+  const receivers = getReceivers()
+    .filter(
+      (client) =>
+        client.socketId !== requesterSocketId &&
+        client.ws.readyState === 1 &&
+        client.deviceId &&
+        client.username
+    )
+    .sort((a, b) => b.connectedAt - a.connectedAt)
+    .slice(0, MAX_DISCOVERY_RECEIVERS_RETURNED)
     .map((client) => ({
       deviceId: client.deviceId,
       username: client.username,
       socketId: client.socketId,
       mode: "receiver",
     }))
+
+  return receivers
 }
 
 /**
