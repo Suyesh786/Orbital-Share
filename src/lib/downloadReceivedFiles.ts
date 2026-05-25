@@ -13,16 +13,46 @@ function triggerBlobDownload(blob: Blob, filename: string): void {
   URL.revokeObjectURL(url)
 }
 
+function getDownloadableFiles(
+  receivedFilesMemory: Record<string, ReceivedFileMemory>,
+  fileIds?: string[]
+): ReceivedFileMemory[] {
+  const all = Object.values(receivedFilesMemory).filter(
+    (entry) => entry.completed && entry.blob.size > 0
+  )
+
+  if (!fileIds || fileIds.length === 0) {
+    return all
+  }
+
+  const idSet = new Set(fileIds)
+  return all.filter((entry) => idSet.has(entry.fileId))
+}
+
 /**
  * Download all reconstructed in-memory files (preserves original filenames).
  */
 export function downloadAllReceivedFiles(
   receivedFilesMemory: Record<string, ReceivedFileMemory>
 ): number {
-  const files = Object.values(receivedFilesMemory).filter(
-    (entry) => entry.completed && entry.blob.size > 0
-  )
+  const files = getDownloadableFiles(receivedFilesMemory)
+  if (files.length === 0) return 0
 
+  for (const file of files) {
+    triggerBlobDownload(file.blob, file.name)
+  }
+
+  return files.length
+}
+
+/**
+ * Download only the selected reconstructed files by fileId.
+ */
+export function downloadSelectedReceivedFiles(
+  receivedFilesMemory: Record<string, ReceivedFileMemory>,
+  fileIds: string[]
+): number {
+  const files = getDownloadableFiles(receivedFilesMemory, fileIds)
   if (files.length === 0) return 0
 
   for (const file of files) {

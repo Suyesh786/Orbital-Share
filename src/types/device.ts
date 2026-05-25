@@ -63,6 +63,18 @@ export interface IncomingFileChunkState {
   completed: boolean
 }
 
+export type PerFileTransferStatus = "waiting" | "transferring" | "completed"
+
+/** Live per-file progress during an active transfer (UI only) */
+export interface PerFileTransferProgress {
+  fileId: string
+  name: string
+  totalBytes: number
+  transferredBytes: number
+  percentage: number
+  status: PerFileTransferStatus
+}
+
 /** Reconstructed in-memory file (receiver — downloadable via Phase 3.2) */
 export interface ReceivedFileMemory {
   fileId: string

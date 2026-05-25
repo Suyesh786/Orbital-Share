@@ -31,16 +31,25 @@ async function readFileChunk(file: File, chunkIndex: number): Promise<Uint8Array
   return new Uint8Array(buffer)
 }
 
+export type OutgoingChunkProgress = {
+  bytesSent: number
+  totalBytes: number
+  fileId: string
+  fileBytesSent: number
+  fileTotalBytes: number
+}
+
 export async function streamOutgoingFiles(
   transferId: string,
   files: OutgoingTransferFile[],
-  onBytesSent: (bytesSent: number, totalBytes: number) => void
+  onProgress: (progress: OutgoingChunkProgress) => void
 ): Promise<boolean> {
   const totalBytes = files.reduce((sum, entry) => sum + entry.size, 0)
   let bytesSent = 0
 
   for (const entry of files) {
     const totalChunks = getChunkCountForFileSize(entry.size)
+    let fileBytesSent = 0
 
     for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
       const chunkData = await readFileChunk(entry.file, chunkIndex)
@@ -59,7 +68,14 @@ export async function streamOutgoingFiles(
       if (!sent) return false
 
       bytesSent += chunkData.byteLength
-      onBytesSent(bytesSent, totalBytes)
+      fileBytesSent += chunkData.byteLength
+      onProgress({
+        bytesSent,
+        totalBytes,
+        fileId: entry.fileId,
+        fileBytesSent,
+        fileTotalBytes: entry.size,
+      })
       await yieldToMain()
     }
   }

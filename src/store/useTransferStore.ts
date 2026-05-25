@@ -3,7 +3,14 @@ import { computeTotalTransferSize } from "@/store/transferUtils"
 import { websocketService } from "@/services/websocket"
 import { mapReceiversToNearbyDevices } from "@/utils/discovery"
 import type { ReceiverDiscoveryEntry } from "@/types/websocket"
-import { downloadAllReceivedFiles as triggerDownloadAllReceivedFiles } from "@/lib/downloadReceivedFiles"
+import {
+  downloadAllReceivedFiles as triggerDownloadAllReceivedFiles,
+  downloadSelectedReceivedFiles as triggerDownloadSelectedReceivedFiles,
+} from "@/lib/downloadReceivedFiles"
+import {
+  buildInitialPerFileProgress,
+  patchPerFileProgress,
+} from "@/lib/perFileTransferProgress"
 import {
   decodeFileChunk,
   getChunkCountForFileSize,
@@ -23,6 +30,7 @@ import type {
   IncomingFileChunkState,
   IncomingTransferRequest,
   NearbyDevice,
+  PerFileTransferProgress,
   PendingOutgoingRequest,
   ReceivedFileMemory,
   RegistrationMode,
@@ -79,6 +87,9 @@ interface TransferStoreState {
   activeTransferTotalBytes: number
   incomingFileChunks: Record<string, IncomingFileChunkState>
   receivedFilesMemory: Record<string, ReceivedFileMemory>
+  perFileTransferProgress: Record<string, PerFileTransferProgress>
+  perFileProgressOrder: string[]
+  selectedCompletedFileIds: Record<string, boolean>
 
   // Transfer requests (Phase 2.4)
   incomingTransferRequest: IncomingTransferRequest | null
@@ -161,6 +172,8 @@ interface TransferStoreState {
   applyFileChunk: (chunk: ReturnType<typeof decodeFileChunk>) => void
   reconstructReceivedFiles: () => void
   downloadAllReceivedFiles: () => number
+  downloadSelectedReceivedFiles: () => number
+  toggleCompletedFileSelection: (fileId: string) => void
   resetDiscovery: () => void
   resetTransferProgress: () => void
   exitTransferToDiscovery: () => void
@@ -184,6 +197,9 @@ const initialTransferSession = {
   activeTransferTotalBytes: 0,
   incomingFileChunks: {} as Record<string, IncomingFileChunkState>,
   receivedFilesMemory: {} as Record<string, ReceivedFileMemory>,
+  perFileTransferProgress: {} as Record<string, PerFileTransferProgress>,
+  perFileProgressOrder: [] as string[],
+  selectedCompletedFileIds: {} as Record<string, boolean>,
   incomingTransferRequest: null as IncomingTransferRequest | null,
   pendingOutgoingRequest: null as PendingOutgoingRequest | null,
   transferRejectionMessage: null as string | null,
@@ -290,6 +306,9 @@ const TRANSFER_FLOW_RESET_FIELDS = {
   activeTransferTotalBytes: 0,
   incomingFileChunks: {} as Record<string, IncomingFileChunkState>,
   receivedFilesMemory: {} as Record<string, ReceivedFileMemory>,
+  perFileTransferProgress: {} as Record<string, PerFileTransferProgress>,
+  perFileProgressOrder: [] as string[],
+  selectedCompletedFileIds: {} as Record<string, boolean>,
   incomingTransferRequest: null as IncomingTransferRequest | null,
   pendingOutgoingRequest: null as PendingOutgoingRequest | null,
   transferRejectionMessage: null as string | null,
@@ -385,6 +404,9 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
       activeTransferTotalBytes: 0,
       incomingFileChunks: {},
       receivedFilesMemory: {},
+      perFileTransferProgress: {},
+      perFileProgressOrder: [],
+      selectedCompletedFileIds: {},
       ...SESSION_CLEAR_FIELDS,
     })
     get().registerDevice()
@@ -613,6 +635,9 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
       bytesTransferred: 0,
       incomingFileChunks: {},
       receivedFilesMemory: {},
+      perFileTransferProgress: {},
+      perFileProgressOrder: [],
+      selectedCompletedFileIds: {},
       transferRejectionMessage: null,
       lastWsEvent: "transfer_request_accepted",
     })
@@ -675,6 +700,8 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
     const incomingFileChunks: Record<string, IncomingFileChunkState> = {}
     const incomingFilesMetadata: TransferFileMetadata[] = []
 
+    const metadataFiles: Array<{ fileId: string; name: string; size: number }> = []
+
     for (const file of payload.files) {
       const totalChunks = getChunkCountForFileSize(file.size)
       incomingFileChunks[file.fileId] = {
@@ -695,11 +722,21 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
         size: file.size,
         type: file.type,
       })
+      metadataFiles.push({
+        fileId: file.fileId,
+        name: file.name,
+        size: file.size,
+      })
     }
+
+    const { perFileTransferProgress, perFileProgressOrder } =
+      buildInitialPerFileProgress(metadataFiles)
 
     set({
       incomingFilesMetadata,
       incomingFileChunks,
+      perFileTransferProgress,
+      perFileProgressOrder,
       activeTransferTotalBytes: payload.totalBytes,
       bytesTransferred: 0,
       transferProgress: 0,
@@ -748,9 +785,15 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
     )
     const totalBytes = state.activeTransferTotalBytes
     const metrics = computeTransferMetrics(bytesTransferred, totalBytes)
+    const perFileTransferProgress = patchPerFileProgress(
+      state.perFileTransferProgress,
+      chunk.fileId,
+      receivedBytes
+    )
 
     set({
       incomingFileChunks,
+      perFileTransferProgress,
       bytesTransferred,
       transferProgress: metrics.progress,
       transferSpeed: metrics.speed,
@@ -791,9 +834,22 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
       }
     }
 
+    const perFileTransferProgress = { ...state.perFileTransferProgress }
+    for (const fileId of state.perFileProgressOrder) {
+      const entry = perFileTransferProgress[fileId]
+      if (!entry) continue
+      perFileTransferProgress[fileId] = {
+        ...entry,
+        transferredBytes: entry.totalBytes,
+        percentage: 100,
+        status: "completed",
+      }
+    }
+
     set({
       receivedFilesMemory,
       incomingFileChunks: {},
+      perFileTransferProgress,
       transferProgress: 100,
       bytesTransferred: state.activeTransferTotalBytes,
       transferSpeed: 0,
@@ -805,6 +861,24 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
 
   downloadAllReceivedFiles: () => {
     return triggerDownloadAllReceivedFiles(get().receivedFilesMemory)
+  },
+
+  downloadSelectedReceivedFiles: () => {
+    const { receivedFilesMemory, selectedCompletedFileIds } = get()
+    const fileIds = Object.entries(selectedCompletedFileIds)
+      .filter(([, selected]) => selected)
+      .map(([fileId]) => fileId)
+    return triggerDownloadSelectedReceivedFiles(receivedFilesMemory, fileIds)
+  },
+
+  toggleCompletedFileSelection: (fileId) => {
+    const current = get().selectedCompletedFileIds[fileId] ?? false
+    set({
+      selectedCompletedFileIds: {
+        ...get().selectedCompletedFileIds,
+        [fileId]: !current,
+      },
+    })
   },
 
   startOutgoingFileTransfer: async () => {
@@ -822,6 +896,14 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
 
     const outgoing = buildOutgoingTransferFiles(activeFiles.map((entry) => entry.file))
     const totalBytes = outgoing.reduce((sum, entry) => sum + entry.size, 0)
+    const { perFileTransferProgress, perFileProgressOrder } =
+      buildInitialPerFileProgress(
+        outgoing.map((entry) => ({
+          fileId: entry.fileId,
+          name: entry.name,
+          size: entry.size,
+        }))
+      )
 
     set({
       transferSessionStatus: "metadata",
@@ -831,6 +913,8 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
       transferProgress: 0,
       transferSpeed: 0,
       estimatedTimeRemaining: 0,
+      perFileTransferProgress,
+      perFileProgressOrder,
     })
 
     const metadataSent = websocketService.sendTransferMetadata({
@@ -852,16 +936,22 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
     await streamOutgoingFiles(
       state.activeTransferId,
       outgoing,
-      (bytesSent, total) => {
-        const metrics = computeTransferMetrics(bytesSent, total)
+      ({ bytesSent, totalBytes, fileId, fileBytesSent }) => {
+        const metrics = computeTransferMetrics(bytesSent, totalBytes)
+        const current = get()
         set({
           bytesTransferred: bytesSent,
-          activeTransferTotalBytes: total,
+          activeTransferTotalBytes: totalBytes,
           transferProgress: metrics.progress,
           transferSpeed: metrics.speed,
           estimatedTimeRemaining: metrics.estimatedTimeRemaining,
           transferState: "transferring",
           transferSessionStatus: "transferring",
+          perFileTransferProgress: patchPerFileProgress(
+            current.perFileTransferProgress,
+            fileId,
+            fileBytesSent
+          ),
         })
       }
     )
@@ -878,10 +968,18 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
     const isSender = state.mode === "sender"
     const completionSummary = buildCompletionSnapshot(state)
 
+    const selectedCompletedFileIds: Record<string, boolean> = {}
+    if (!isSender) {
+      for (const fileId of Object.keys(state.receivedFilesMemory)) {
+        selectedCompletedFileIds[fileId] = true
+      }
+    }
+
     transferCompleteSentForId = ""
 
     set({
       completionSummary,
+      selectedCompletedFileIds,
       incomingFileChunks: {},
       ...SESSION_CLEAR_FIELDS,
       incomingTransferRequest: null,
@@ -1444,6 +1542,18 @@ export const selectReceivedFileCount = (state: TransferStoreState) =>
   Object.keys(state.receivedFilesMemory).length
 export const selectDownloadAllReceivedFiles = (state: TransferStoreState) =>
   state.downloadAllReceivedFiles
+export const selectDownloadSelectedReceivedFiles = (state: TransferStoreState) =>
+  state.downloadSelectedReceivedFiles
+export const selectToggleCompletedFileSelection = (state: TransferStoreState) =>
+  state.toggleCompletedFileSelection
+export const selectSelectedCompletedFileIds = (state: TransferStoreState) =>
+  state.selectedCompletedFileIds
+export const selectReceivedFilesMemory = (state: TransferStoreState) =>
+  state.receivedFilesMemory
+export const selectPerFileProgressOrder = (state: TransferStoreState) =>
+  state.perFileProgressOrder
+export const selectPerFileTransferProgress = (state: TransferStoreState) =>
+  state.perFileTransferProgress
 export const selectConnectWebSocket = (state: TransferStoreState) =>
   state.connectWebSocket
 export const selectDisconnectWebSocket = (state: TransferStoreState) =>
