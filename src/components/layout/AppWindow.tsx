@@ -5,8 +5,8 @@ import { UserProfile } from "@/components/profile/UserProfile"
 import { BackgroundGlow } from "./BackgroundGlow"
 import { TrafficLights } from "./TrafficLights"
 
-const WINDOW_WIDTH = 920
-const WINDOW_HEIGHT = 680
+const WINDOW_WIDTH = 1080
+const WINDOW_HEIGHT = 760
 
 interface AppWindowProps {
   children: ReactNode
@@ -42,8 +42,7 @@ export function AppWindow({ children }: AppWindowProps) {
         </div>
 
         <header className="flex shrink-0 items-center gap-3 px-5 pt-4 pb-1">
-          <TrafficLights />
-          <div className="flex flex-1 items-center justify-center gap-2">
+        <div className="flex w-full items-center justify-center gap-2">
             <span
               className={
                 isHome
