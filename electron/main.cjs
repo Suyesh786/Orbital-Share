@@ -1,4 +1,5 @@
 const { app, BrowserWindow } = require('electron');
+const path = require('path');
 
 /** Keep in sync with src/components/layout/AppWindow.tsx */
 const APP_WINDOW_WIDTH = 1080;
@@ -28,8 +29,14 @@ function createWindow() {
     },
   });
 
-  const devUrl = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
-  mainWindow.loadURL(devUrl);
+  const isDev = !app.isPackaged;
+
+  if (isDev) {
+    const devUrl = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
+    mainWindow.loadURL(devUrl);
+  } else {
+    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+  }
 
   mainWindow.on('closed', () => {
     mainWindow = null;
