@@ -63,6 +63,27 @@
   #root {
     @apply flex min-h-screen items-center justify-center;
   }
+
+  html.electron,
+  html.electron body {
+    @apply h-full min-h-0 overflow-hidden bg-[#08090c];
+  }
+
+  html.electron #root {
+    display: block;
+    height: 100%;
+    min-height: 100%;
+  }
+}
+
+@layer utilities {
+  html.electron .electron-drag {
+    -webkit-app-region: drag;
+  }
+
+  html.electron .electron-no-drag {
+    -webkit-app-region: no-drag;
+  }
 }
 
 @layer utilities {

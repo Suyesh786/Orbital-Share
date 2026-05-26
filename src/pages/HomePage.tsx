@@ -40,23 +40,28 @@ export function HomePage() {
       <div className="relative z-[1] flex min-h-0 flex-1 flex-col">
         <div className="relative flex flex-1 flex-col items-center px-10 pb-4 pt-[5.75%]">
           <div className="relative z-[1] flex w-full max-w-[580px] flex-col items-center">
-            <div className="relative flex w-full items-center justify-center py-1.5">
-              <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                <HomeOrbitAtmosphere />
+            <div className="relative flex w-full flex-col items-center py-1.5">
+              <div className="relative mx-auto size-[240px]">
+                <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                  <HomeOrbitAtmosphere />
+                </div>
+                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center">
+                  <div className="flex flex-col items-center -translate-x-3 translate-y-4">
+                    <HomeBrandRow intro />
+                    <motion.p
+                      className="mt-4 text-center text-[15px] font-normal tracking-[0.05em] text-white/40"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      transition={{ duration: 0.38, ease: easeOut, delay: 0.32 }}
+                    >
+                      Local wireless file transfer
+                    </motion.p>
+                  </div>
+                </div>
               </div>
-              <HomeBrandRow intro />
             </div>
 
-            <motion.p
-              className="mt-4 text-center text-[15px] font-normal tracking-[0.05em] text-white/40"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ duration: 0.38, ease: easeOut, delay: 0.32 }}
-            >
-              Local wireless file transfer
-            </motion.p>
-
-            <div className="mt-[4.25rem] flex w-full flex-col gap-3.5">
+            <div className="mt-[5rem] flex w-full flex-col items-center gap-3.5">
               <HomeActionButton
                 onClick={handleSend}
                 icon={Send}

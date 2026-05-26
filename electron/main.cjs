@@ -1,16 +1,19 @@
 const { app, BrowserWindow } = require('electron');
-const path = require('path');
+
+/** Keep in sync with src/components/layout/AppWindow.tsx */
+const APP_WINDOW_WIDTH = 1080;
+const APP_WINDOW_HEIGHT = 760;
 
 let mainWindow;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1180,
-    height: 780,
-    minWidth: 1100,
-    minHeight: 700,
+    width: APP_WINDOW_WIDTH,
+    height: APP_WINDOW_HEIGHT,
+    minWidth: APP_WINDOW_WIDTH,
+    minHeight: APP_WINDOW_HEIGHT,
 
-    backgroundColor: '#050816',
+    backgroundColor: '#08090c',
 
     titleBarStyle: 'hiddenInset',
 
@@ -19,16 +22,14 @@ function createWindow() {
       y: 16,
     },
 
-    vibrancy: 'under-window',
-    visualEffectState: 'active',
-
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
     },
   });
 
-  mainWindow.loadURL('http://localhost:5173');
+  const devUrl = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
+  mainWindow.loadURL(devUrl);
 
   mainWindow.on('closed', () => {
     mainWindow = null;
