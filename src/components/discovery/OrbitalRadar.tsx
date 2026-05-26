@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { AnimatePresence, motion } from "framer-motion"
 import { Monitor } from "lucide-react"
 import { DeviceNode } from "@/components/discovery/DeviceNode"
+import { OrbitAmbientParticles } from "@/components/discovery/OrbitAmbientParticles"
 import { OrbitRings } from "@/components/discovery/OrbitRings"
 import {
   selectNearbyDevices,
@@ -53,6 +54,7 @@ export function OrbitalRadar({ onRequestTransfer }: OrbitalRadarProps) {
   return (
     <div className="relative mx-auto flex h-[320px] w-full max-w-md items-center justify-center">
       <OrbitRings />
+      <OrbitAmbientParticles />
 
       <motion.div
         className="relative z-20 flex size-16 flex-col items-center justify-center rounded-2xl glass-panel glow-cyan"

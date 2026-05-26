@@ -1,9 +1,7 @@
 import type { ReactNode } from "react"
 import { useLocation } from "react-router-dom"
-import { DevSessionPanel } from "@/components/debug/DevSessionPanel"
 import { TrustInboxLayer } from "@/components/trust/TrustInboxLayer"
 import { UserProfile } from "@/components/profile/UserProfile"
-import { NearDropMark } from "@/components/shared/NearDropMark"
 import { BackgroundGlow } from "./BackgroundGlow"
 import { TrafficLights } from "./TrafficLights"
 
@@ -33,6 +31,7 @@ export function AppWindow({ children }: AppWindowProps) {
         aria-hidden
       />
       {!isHome ? <BackgroundGlow /> : null}
+      <div className="neardrop-window-vignette pointer-events-none absolute inset-0 z-[2]" aria-hidden />
 
       <div className="relative z-10 flex h-full flex-col">
         <div className="pointer-events-none absolute top-3.5 right-5 z-30">
@@ -45,18 +44,15 @@ export function AppWindow({ children }: AppWindowProps) {
         <header className="flex shrink-0 items-center gap-3 px-5 pt-4 pb-1">
           <TrafficLights />
           <div className="flex flex-1 items-center justify-center gap-2">
-            {isHome ? (
-              <>
-                <NearDropMark size={14} />
-                <span className="text-[11px] font-medium tracking-[0.14em] text-white/30 uppercase">
-                  NearDrop
-                </span>
-              </>
-            ) : (
-              <span className="text-[11px] font-medium tracking-wide text-white/28">
-                NearDrop
-              </span>
-            )}
+            <span
+              className={
+                isHome
+                  ? "text-[11px] font-medium tracking-[0.12em] text-white/32"
+                  : "text-[11px] font-medium tracking-wide text-white/28"
+              }
+            >
+              NearDrop
+            </span>
           </div>
           <div className="w-[52px]" aria-hidden />
         </header>
@@ -64,8 +60,6 @@ export function AppWindow({ children }: AppWindowProps) {
         <main className="relative min-h-0 flex-1 overflow-hidden px-6 pb-5">
           {children}
         </main>
-
-        {import.meta.env.DEV ? <DevSessionPanel /> : null}
       </div>
     </div>
   )

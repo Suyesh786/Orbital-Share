@@ -181,39 +181,178 @@
 
   .neardrop-title {
     background: linear-gradient(
-      168deg,
-      rgba(248, 250, 252, 0.98) 0%,
-      rgba(210, 218, 228, 0.92) 28%,
-      rgba(168, 178, 194, 0.88) 46%,
-      rgba(228, 232, 240, 0.95) 62%,
-      rgba(190, 198, 212, 0.9) 82%,
-      rgba(220, 226, 236, 0.94) 100%
+      175deg,
+      rgba(252, 253, 255, 0.99) 0%,
+      rgba(225, 230, 238, 0.94) 22%,
+      rgba(175, 185, 200, 0.9) 42%,
+      rgba(240, 243, 248, 0.97) 58%,
+      rgba(195, 204, 218, 0.92) 78%,
+      rgba(235, 239, 245, 0.96) 100%
     );
     -webkit-background-clip: text;
     background-clip: text;
     -webkit-text-fill-color: transparent;
-    filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.06))
-      drop-shadow(0 12px 32px rgba(94, 184, 201, 0.07));
+    filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.08))
+      drop-shadow(0 2px 12px rgba(255, 255, 255, 0.04))
+      drop-shadow(0 16px 40px rgba(94, 184, 201, 0.09));
+  }
+
+  .neardrop-title-inline {
+    padding-bottom: 0.04em;
+    margin-top: 0.02em;
+  }
+
+  .neardrop-window-vignette {
+    background: radial-gradient(
+      ellipse 105% 95% at 50% 48%,
+      transparent 50%,
+      rgba(4, 6, 14, 0.42) 100%
+    );
+    opacity: 0.9;
   }
 
   .neardrop-base-wash {
     background: radial-gradient(
-        ellipse 110% 85% at 50% 28%,
-        #162232 0%,
-        #101820 38%,
-        #0a0d14 72%,
-        #07080c 100%
+        ellipse 115% 90% at 50% 26%,
+        #1a2840 0%,
+        #121c2c 32%,
+        #0e121c 58%,
+        #080a10 100%
       ),
-      linear-gradient(180deg, #121a28 0%, #090b12 55%, #06070a 100%);
+      linear-gradient(180deg, #141e2e 0%, #0a0e16 52%, #06080c 100%);
+  }
+
+  .neardrop-fog {
+    will-change: transform, opacity;
+  }
+
+  .neardrop-fog-a {
+    background: radial-gradient(
+      ellipse 70% 55% at 22% 30%,
+      rgba(50, 90, 120, 0.16) 0%,
+      transparent 70%
+    );
+    animation: neardrop-fog-drift-a 58s ease-in-out infinite;
+  }
+
+  .neardrop-fog-b {
+    background: radial-gradient(
+      ellipse 65% 50% at 78% 35%,
+      rgba(40, 70, 100, 0.14) 0%,
+      rgba(60, 50, 90, 0.06) 40%,
+      transparent 72%
+    );
+    animation: neardrop-fog-drift-b 64s ease-in-out infinite;
+  }
+
+  .neardrop-hero-spotlight {
+    background: radial-gradient(
+      circle,
+      rgba(94, 184, 201, 0.18) 0%,
+      rgba(50, 100, 130, 0.08) 35%,
+      transparent 68%
+    );
+    animation: neardrop-hero-breathe 26s ease-in-out infinite;
+    will-change: opacity, transform;
+  }
+
+  .neardrop-hero-spotlight-inner {
+    background: radial-gradient(
+      circle,
+      rgba(120, 200, 215, 0.16) 0%,
+      rgba(94, 184, 201, 0.07) 45%,
+      transparent 72%
+    );
+    animation: neardrop-hero-breathe 26s ease-in-out infinite reverse;
   }
 
   .neardrop-horizon-glow {
     background: radial-gradient(
       ellipse 90% 45% at 50% 88%,
-      rgba(30, 55, 75, 0.35) 0%,
+      rgba(30, 55, 75, 0.45) 0%,
+      rgba(20, 45, 65, 0.12) 50%,
+      transparent 72%
+    );
+    opacity: 0.85;
+  }
+
+  .neardrop-lower-haze {
+    background: linear-gradient(
+      to top,
+      rgba(18, 38, 55, 0.22) 0%,
+      rgba(14, 30, 48, 0.1) 35%,
+      transparent 100%
+    );
+    animation: neardrop-lower-haze-drift 48s ease-in-out infinite;
+    will-change: opacity;
+  }
+
+  .neardrop-lower-glow {
+    transform: translateX(-50%);
+    background: radial-gradient(
+      circle,
+      rgba(50, 100, 125, 0.12) 0%,
+      rgba(30, 70, 95, 0.06) 40%,
       transparent 70%
     );
-    opacity: 0.7;
+    animation: neardrop-lower-glow-breathe 32s ease-in-out infinite;
+    will-change: opacity, transform;
+  }
+
+  .neardrop-lower-particle {
+    width: 2.5px;
+    height: 2.5px;
+    border-radius: 50%;
+    background: rgba(130, 200, 215, 0.45);
+    box-shadow: 0 0 8px rgba(94, 184, 201, 0.25);
+    animation: neardrop-lower-particle-drift 18s ease-in-out infinite;
+    will-change: transform, opacity;
+  }
+
+  .neardrop-home-orbit-spotlight {
+    background: radial-gradient(
+      circle,
+      rgba(94, 184, 201, 0.12) 0%,
+      rgba(45, 90, 115, 0.05) 50%,
+      transparent 75%
+    );
+    animation: neardrop-home-orbit-spotlight 6s ease-in-out infinite;
+  }
+
+  .neardrop-home-orbit-inner {
+    border: 1px solid rgba(94, 184, 201, 0.16);
+    box-shadow: 0 0 20px rgba(94, 184, 201, 0.06);
+    animation: neardrop-home-orbit-ring 6s ease-in-out infinite;
+  }
+
+  .neardrop-home-orbit-outer {
+    border: 1px solid rgba(94, 184, 201, 0.08);
+    box-shadow: 0 0 12px rgba(94, 184, 201, 0.04);
+    animation: neardrop-home-orbit-ring 6s ease-in-out infinite;
+    animation-delay: -2s;
+  }
+
+  .neardrop-receiver-spotlight {
+    background: radial-gradient(
+      circle,
+      rgba(94, 184, 201, 0.12) 0%,
+      rgba(50, 95, 120, 0.05) 55%,
+      transparent 78%
+    );
+    animation: neardrop-receiver-spotlight 5s ease-in-out infinite;
+  }
+
+  .neardrop-receiver-wave {
+    border: 1px solid rgba(94, 184, 201, 0.28);
+    box-shadow: 0 0 16px rgba(94, 184, 201, 0.12);
+    transform: translate(-50%, -50%) scale(0.4);
+    animation: neardrop-receiver-wave 3.6s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+    will-change: transform, opacity;
+  }
+
+  .neardrop-receiver-core-dot {
+    box-shadow: 0 0 14px rgba(94, 184, 201, 0.55);
+    animation: neardrop-receiver-core-pulse 2.4s ease-in-out infinite;
   }
 
   .neardrop-color-breathe {
@@ -233,8 +372,8 @@
   .neardrop-aurora {
     background: radial-gradient(
       ellipse 58% 42% at 28% 32%,
-      rgba(94, 184, 201, 0.11) 0%,
-      rgba(40, 90, 110, 0.04) 45%,
+      rgba(94, 184, 201, 0.15) 0%,
+      rgba(40, 90, 110, 0.06) 45%,
       transparent 68%
     );
     animation: neardrop-aurora-drift 36s ease-in-out infinite;
@@ -244,8 +383,8 @@
   .neardrop-aurora-alt {
     background: radial-gradient(
       ellipse 52% 40% at 72% 38%,
-      rgba(55, 95, 140, 0.09) 0%,
-      rgba(30, 50, 80, 0.03) 50%,
+      rgba(55, 95, 140, 0.12) 0%,
+      rgba(30, 50, 80, 0.05) 50%,
       transparent 70%
     );
     animation: neardrop-aurora-drift-alt 44s ease-in-out infinite;
@@ -254,7 +393,7 @@
   .neardrop-aurora-violet {
     background: radial-gradient(
       ellipse 45% 35% at 50% 58%,
-      rgba(72, 58, 110, 0.07) 0%,
+      rgba(72, 58, 110, 0.1) 0%,
       transparent 65%
     );
     animation: neardrop-aurora-drift-violet 40s ease-in-out infinite;
@@ -264,9 +403,9 @@
     transform: translate(-50%, -50%);
     background: radial-gradient(
       circle,
-      rgba(94, 184, 201, 0.06) 0%,
-      rgba(30, 60, 80, 0.03) 40%,
-      transparent 70%
+      rgba(94, 184, 201, 0.16) 0%,
+      rgba(45, 85, 110, 0.08) 38%,
+      transparent 72%
     );
     animation: neardrop-center-glow-breathe 28s ease-in-out infinite;
     will-change: opacity, transform;
@@ -291,60 +430,127 @@
     opacity: 0.85;
   }
 
-  .neardrop-wave {
-    animation: neardrop-wave-pulse 22s ease-in-out infinite;
-    will-change: transform, opacity;
-  }
-
-  .neardrop-wave-2 {
-    animation-delay: -7s;
-  }
-
-  .neardrop-wave-3 {
-    animation-delay: -14s;
-  }
-
   .neardrop-mark-glow {
     background: radial-gradient(
       circle,
-      rgba(94, 184, 201, 0.14) 0%,
+      rgba(94, 184, 201, 0.24) 0%,
+      rgba(94, 184, 201, 0.08) 45%,
+      transparent 72%
+    );
+    animation: neardrop-mark-glow 3.2s ease-in-out infinite;
+  }
+
+  .neardrop-mark-idle .neardrop-mark-beam {
+    animation: neardrop-beam-pulse 3.5s ease-in-out infinite;
+  }
+
+  .neardrop-mark-idle .neardrop-mark-field {
+    animation: neardrop-field-breathe 5s ease-in-out infinite;
+  }
+
+  .neardrop-mark-packet {
+    animation: neardrop-packet-flow 2.8s ease-in-out infinite;
+  }
+
+  .neardrop-mark-packet-2 {
+    animation-delay: 0.45s;
+  }
+
+  .neardrop-mark-packet-3 {
+    animation-delay: 0.9s;
+  }
+
+  .neardrop-glass-button {
+    background: linear-gradient(
+      168deg,
+      rgba(255, 255, 255, 0.06) 0%,
+      rgba(255, 255, 255, 0.025) 48%,
+      rgba(255, 255, 255, 0.015) 100%
+    );
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+
+  .neardrop-glass-button-primary {
+    border-color: rgba(94, 184, 201, 0.28);
+    background: linear-gradient(
+      168deg,
+      rgba(94, 184, 201, 0.12) 0%,
+      rgba(255, 255, 255, 0.05) 42%,
+      rgba(255, 255, 255, 0.02) 100%
+    );
+  }
+
+  .neardrop-glass-button-primary:hover {
+    border-color: rgba(94, 184, 201, 0.42);
+    background: linear-gradient(
+      168deg,
+      rgba(94, 184, 201, 0.16) 0%,
+      rgba(255, 255, 255, 0.07) 45%,
+      rgba(255, 255, 255, 0.03) 100%
+    );
+  }
+
+  .neardrop-orbit-spotlight {
+    background: radial-gradient(
+      circle,
+      rgba(94, 184, 201, 0.1) 0%,
+      rgba(40, 80, 100, 0.04) 45%,
       transparent 70%
     );
-    animation: neardrop-mark-glow 3s ease-in-out infinite;
+    animation: neardrop-orbit-spotlight-breathe 5s ease-in-out infinite;
   }
 
-  .neardrop-mark-idle .neardrop-mark-orbit {
-    transform-origin: 32px 32px;
-    animation: neardrop-orbit-spin 48s linear infinite;
+  .neardrop-orbit-ring-inner {
+    border: 1.5px solid rgba(94, 184, 201, 0.22);
+    box-shadow:
+      0 0 24px rgba(94, 184, 201, 0.08),
+      inset 0 0 20px rgba(94, 184, 201, 0.04);
+    animation: neardrop-orbit-ring-breathe 5s ease-in-out infinite;
   }
 
-  .neardrop-mark-ripple {
-    transform-origin: 32px 32px;
-    fill: none;
-    animation: neardrop-ripple-expand 3.4s ease-out infinite;
+  .neardrop-orbit-ring-mid {
+    border: 1px solid rgba(94, 184, 201, 0.14);
+    box-shadow: 0 0 16px rgba(94, 184, 201, 0.04);
+    animation: neardrop-orbit-ring-breathe 5s ease-in-out infinite;
+    animation-delay: -1.2s;
   }
 
-  .neardrop-mark-ripple-delay {
-    animation-delay: 1.1s;
+  .neardrop-orbit-ring-outer {
+    border: 1px solid rgba(94, 184, 201, 0.07);
+    opacity: 0.85;
+    animation: neardrop-orbit-ring-breathe 5s ease-in-out infinite;
+    animation-delay: -2.4s;
   }
 
-  .neardrop-mark-core-ring {
-    animation: neardrop-core-pulse 2.6s ease-in-out infinite;
+  .neardrop-orbit-ripple {
+    border: 1px solid rgba(94, 184, 201, 0.2);
+    animation: neardrop-orbit-ripple 4.5s ease-out infinite;
+  }
+
+  .neardrop-orbit-particle {
+    width: 3px;
+    height: 3px;
+    border-radius: 50%;
+    background: rgba(140, 210, 225, 0.55);
+    box-shadow: 0 0 6px rgba(94, 184, 201, 0.35);
+    animation: neardrop-orbit-particle-drift 14s ease-in-out infinite;
+    will-change: transform, opacity;
   }
 
   @keyframes neardrop-color-shift {
     0%,
     100% {
       background-position: 0% 50%;
-      opacity: 0.55;
+      opacity: 0.65;
     }
     33% {
       background-position: 50% 30%;
-      opacity: 0.72;
+      opacity: 0.85;
     }
     66% {
       background-position: 100% 60%;
-      opacity: 0.62;
+      opacity: 0.72;
     }
   }
 
@@ -352,11 +558,11 @@
     0%,
     100% {
       transform: translate(0, 0) scale(1);
-      opacity: 0.55;
+      opacity: 0.65;
     }
     50% {
       transform: translate(2.5%, -1.8%) scale(1.04);
-      opacity: 0.82;
+      opacity: 0.92;
     }
   }
 
@@ -364,11 +570,11 @@
     0%,
     100% {
       transform: translate(0, 0);
-      opacity: 0.4;
+      opacity: 0.5;
     }
     50% {
       transform: translate(-2.5%, 1.2%);
-      opacity: 0.65;
+      opacity: 0.78;
     }
   }
 
@@ -376,23 +582,226 @@
     0%,
     100% {
       transform: translate(0, 0) scale(1);
-      opacity: 0.35;
+      opacity: 0.45;
     }
     50% {
       transform: translate(1%, 2%);
+      opacity: 0.68;
+    }
+  }
+
+  @keyframes neardrop-lower-haze-drift {
+    0%,
+    100% {
+      opacity: 0.75;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+
+  @keyframes neardrop-lower-glow-breathe {
+    0%,
+    100% {
+      opacity: 0.7;
+      transform: translateX(-50%) scale(0.98);
+    }
+    50% {
+      opacity: 1;
+      transform: translateX(-50%) scale(1.03);
+    }
+  }
+
+  @keyframes neardrop-lower-particle-drift {
+    0%,
+    100% {
+      transform: translate(0, 0);
+      opacity: 0.2;
+    }
+    50% {
+      transform: translate(4px, -10px);
       opacity: 0.55;
+    }
+  }
+
+  @keyframes neardrop-home-orbit-spotlight {
+    0%,
+    100% {
+      opacity: 0.8;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+
+  @keyframes neardrop-home-orbit-ring {
+    0%,
+    100% {
+      opacity: 0.45;
+    }
+    50% {
+      opacity: 0.75;
+    }
+  }
+
+  @keyframes neardrop-receiver-spotlight {
+    0%,
+    100% {
+      opacity: 0.75;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+
+  @keyframes neardrop-receiver-wave {
+    0% {
+      transform: translate(-50%, -50%) scale(0.35);
+      opacity: 0.5;
+    }
+    70% {
+      opacity: 0.15;
+    }
+    100% {
+      transform: translate(-50%, -50%) scale(2.15);
+      opacity: 0;
+    }
+  }
+
+  @keyframes neardrop-receiver-core-pulse {
+    0%,
+    100% {
+      opacity: 0.65;
+      transform: scale(0.95);
+    }
+    50% {
+      opacity: 1;
+      transform: scale(1.05);
+    }
+  }
+
+  @keyframes neardrop-fog-drift-a {
+    0%,
+    100% {
+      transform: translate(0, 0) scale(1);
+      opacity: 0.65;
+    }
+    50% {
+      transform: translate(3%, -2%) scale(1.05);
+      opacity: 0.95;
+    }
+  }
+
+  @keyframes neardrop-fog-drift-b {
+    0%,
+    100% {
+      transform: translate(0, 0);
+      opacity: 0.55;
+    }
+    50% {
+      transform: translate(-2.5%, 2%);
+      opacity: 0.82;
+    }
+  }
+
+  @keyframes neardrop-hero-breathe {
+    0%,
+    100% {
+      opacity: 0.7;
+      transform: scale(0.98);
+    }
+    50% {
+      opacity: 1;
+      transform: scale(1.03);
     }
   }
 
   @keyframes neardrop-center-glow-breathe {
     0%,
     100% {
-      opacity: 0.65;
-      transform: translate(-50%, -50%) scale(0.97);
+      opacity: 0.7;
+      transform: translate(-50%, -50%) scale(0.96);
+    }
+    50% {
+      opacity: 1;
+      transform: translate(-50%, -50%) scale(1.04);
+    }
+  }
+
+  @keyframes neardrop-beam-pulse {
+    0%,
+    100% {
+      opacity: 0.55;
+    }
+    50% {
+      opacity: 0.75;
+    }
+  }
+
+  @keyframes neardrop-field-breathe {
+    0%,
+    100% {
+      opacity: 0.35;
+    }
+    50% {
+      opacity: 0.55;
+    }
+  }
+
+  @keyframes neardrop-packet-flow {
+    0%,
+    100% {
+      opacity: 0.35;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+
+  @keyframes neardrop-orbit-spotlight-breathe {
+    0%,
+    100% {
+      opacity: 0.75;
+      transform: translate(-50%, -50%) scale(0.98);
+    }
+    50% {
+      opacity: 1;
+      transform: translate(-50%, -50%) scale(1.02);
+    }
+  }
+
+  @keyframes neardrop-orbit-ring-breathe {
+    0%,
+    100% {
+      opacity: 0.55;
+      transform: translate(-50%, -50%) scale(1);
     }
     50% {
       opacity: 0.95;
-      transform: translate(-50%, -50%) scale(1.02);
+      transform: translate(-50%, -50%) scale(1.012);
+    }
+  }
+
+  @keyframes neardrop-orbit-ripple {
+    0% {
+      transform: translate(-50%, -50%) scale(1);
+      opacity: 0.4;
+    }
+    100% {
+      transform: translate(-50%, -50%) scale(5.5);
+      opacity: 0;
+    }
+  }
+
+  @keyframes neardrop-orbit-particle-drift {
+    0%,
+    100% {
+      transform: translate(0, 0);
+      opacity: 0.25;
+    }
+    50% {
+      transform: translate(6px, -8px);
+      opacity: 0.7;
     }
   }
 
@@ -430,39 +839,6 @@
     }
   }
 
-  @keyframes neardrop-orbit-spin {
-    from {
-      transform: rotate(0deg);
-    }
-    to {
-      transform: rotate(360deg);
-    }
-  }
-
-  @keyframes neardrop-ripple-expand {
-    0% {
-      transform: scale(0.92);
-      opacity: 0.22;
-    }
-    70% {
-      transform: scale(1.06);
-      opacity: 0.06;
-    }
-    100% {
-      transform: scale(1.08);
-      opacity: 0;
-    }
-  }
-
-  @keyframes neardrop-core-pulse {
-    0%,
-    100% {
-      opacity: 0.4;
-    }
-    50% {
-      opacity: 0.75;
-    }
-  }
 
   .neardrop-drag-atmosphere-center {
     background: radial-gradient(

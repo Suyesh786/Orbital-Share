@@ -3,8 +3,11 @@ import { Download, Send } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 import { HomeActionButton } from "@/components/home/HomeActionButton"
 import { HomeAmbientBackground } from "@/components/home/HomeAmbientBackground"
+import { HomeBrandRow } from "@/components/home/HomeBrandRow"
+import { HomeHeroGlow } from "@/components/home/HomeHeroGlow"
+import { HomeLowerAtmosphere } from "@/components/home/HomeLowerAtmosphere"
+import { HomeOrbitAtmosphere } from "@/components/home/HomeOrbitAtmosphere"
 import { HomeStatusBar } from "@/components/home/HomeStatusBar"
-import { NearDropMark } from "@/components/shared/NearDropMark"
 import {
   selectStartReceiveFlow,
   selectStartSendFlow,
@@ -29,35 +32,31 @@ export function HomePage() {
   }
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col">
+    <div className="relative flex h-full min-h-0 flex-col overflow-hidden">
       <HomeAmbientBackground intro />
+      <HomeHeroGlow />
+      <HomeLowerAtmosphere />
 
       <div className="relative z-[1] flex min-h-0 flex-1 flex-col">
-        <div className="flex flex-1 flex-col items-center justify-center px-10 pb-4 pt-0">
-          <div className="-mt-14 flex flex-col items-center">
-            <NearDropMark size={80} intro />
-
-            <motion.div
-              className="mt-5 text-center"
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.42, ease: easeOut, delay: 0.28 }}
-            >
-              <h1 className="neardrop-title text-[32px] font-semibold tracking-[-0.04em]">
-                NearDrop
-              </h1>
-            </motion.div>
+        <div className="relative flex flex-1 flex-col items-center px-10 pb-4 pt-[5.75%]">
+          <div className="relative z-[1] flex w-full max-w-[580px] flex-col items-center">
+            <div className="relative flex w-full items-center justify-center py-1.5">
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                <HomeOrbitAtmosphere />
+              </div>
+              <HomeBrandRow intro />
+            </div>
 
             <motion.p
-              className="mt-2 text-center text-[14.5px] font-normal tracking-[0.04em] text-white/40"
+              className="mt-4 text-center text-[15px] font-normal tracking-[0.05em] text-white/40"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              transition={{ duration: 0.38, ease: easeOut, delay: 0.4 }}
+              transition={{ duration: 0.38, ease: easeOut, delay: 0.32 }}
             >
               Local wireless file transfer
             </motion.p>
 
-            <div className="mt-10 flex w-full max-w-[380px] flex-col gap-3">
+            <div className="mt-[4.25rem] flex w-full flex-col gap-3.5">
               <HomeActionButton
                 onClick={handleSend}
                 icon={Send}
@@ -77,7 +76,7 @@ export function HomePage() {
           </div>
         </div>
 
-        <div className="px-7">
+        <div className="relative z-[1] px-7">
           <HomeStatusBar introDelay={0.72} />
         </div>
       </div>

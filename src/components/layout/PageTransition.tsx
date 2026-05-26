@@ -1,41 +1,54 @@
 import { motion } from "framer-motion"
 import type { ReactNode } from "react"
 
+const ease = [0.22, 1, 0.36, 1] as const
+
 const defaultVariants = {
   initial: {
     opacity: 0,
-    y: 12,
-    filter: "blur(4px)",
+    y: 8,
+    scale: 0.992,
+    filter: "blur(3px)",
   },
   animate: {
     opacity: 1,
     y: 0,
+    scale: 1,
     filter: "blur(0px)",
     transition: {
-      duration: 0.45,
-      ease: [0.22, 1, 0.36, 1] as const,
+      duration: 0.32,
+      ease,
     },
   },
   exit: {
     opacity: 0,
-    y: -8,
-    filter: "blur(4px)",
+    y: -6,
+    scale: 0.994,
+    filter: "blur(3px)",
     transition: {
-      duration: 0.3,
-      ease: [0.22, 1, 0.36, 1] as const,
+      duration: 0.28,
+      ease,
     },
   },
 }
 
 const homeVariants = {
-  initial: { opacity: 0 },
+  initial: {
+    opacity: 0,
+    scale: 0.994,
+    filter: "blur(2px)",
+  },
   animate: {
     opacity: 1,
-    transition: { duration: 0.28, ease: [0.25, 0.1, 0.25, 1] as const },
+    scale: 1,
+    filter: "blur(0px)",
+    transition: { duration: 0.32, ease },
   },
   exit: {
     opacity: 0,
-    transition: { duration: 0.2, ease: [0.25, 0.1, 0.25, 1] as const },
+    scale: 0.996,
+    filter: "blur(2px)",
+    transition: { duration: 0.26, ease },
   },
 }
 
@@ -57,6 +70,7 @@ export function PageTransition({
       animate="animate"
       exit="exit"
       className={className}
+      style={{ willChange: "opacity, transform, filter" }}
     >
       {children}
     </motion.div>
