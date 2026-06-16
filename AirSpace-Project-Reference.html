@@ -1,0 +1,1109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AirSpace — Project Reference Document</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  :root {
+    --bg: #0a0b0f;
+    --surface: #13151c;
+    --surface2: #1a1d27;
+    --border: #2a2d3a;
+    --accent: #6c63ff;
+    --accent2: #00d4ff;
+    --accent3: #ff6b6b;
+    --green: #00e676;
+    --yellow: #ffd740;
+    --text: #e8eaf0;
+    --muted: #7b8099;
+    --code-bg: #0d0f1a;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Inter', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 13px;
+    line-height: 1.7;
+  }
+
+  /* ── PRINT STYLES ─────────────────────────────────────────────── */
+  @media print {
+    body { background: #fff; color: #111; font-size: 11px; }
+    .cover { background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460) !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .cover * { color: white !important; }
+    .page-break { page-break-before: always; }
+    .no-print { display: none; }
+    section { border: 1px solid #ddd !important; background: #fff !important; }
+    .tag { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    code, pre { background: #f5f5f5 !important; color: #222 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .badge { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    h1,h2,h3,h4 { color: #111 !important; }
+    .muted { color: #555 !important; }
+    .file-row { border-bottom: 1px solid #eee !important; }
+  }
+
+  /* ── COVER PAGE ───────────────────────────────────────────────── */
+  .cover {
+    background: linear-gradient(135deg, #0d1117 0%, #161b27 40%, #1a1033 70%, #0d1117 100%);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    padding: 60px 40px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .cover::before {
+    content: '';
+    position: absolute;
+    width: 600px; height: 600px;
+    background: radial-gradient(circle, rgba(108,99,255,0.15) 0%, transparent 70%);
+    top: -100px; left: 50%;
+    transform: translateX(-50%);
+    pointer-events: none;
+  }
+
+  .cover-badge {
+    background: linear-gradient(135deg, rgba(108,99,255,0.3), rgba(0,212,255,0.2));
+    border: 1px solid rgba(108,99,255,0.5);
+    border-radius: 100px;
+    padding: 6px 20px;
+    font-size: 11px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--accent2);
+    margin-bottom: 32px;
+    display: inline-block;
+  }
+
+  .cover-logo {
+    font-size: 72px;
+    font-weight: 800;
+    letter-spacing: -3px;
+    background: linear-gradient(135deg, #ffffff 0%, #a78bfa 50%, #60a5fa 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 16px;
+    line-height: 1;
+  }
+
+  .cover-sub {
+    font-size: 18px;
+    color: rgba(255,255,255,0.5);
+    font-weight: 300;
+    margin-bottom: 48px;
+    letter-spacing: 0.5px;
+  }
+
+  .cover-meta {
+    display: flex;
+    gap: 32px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  .cover-meta-item {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    padding: 16px 24px;
+    text-align: center;
+  }
+
+  .cover-meta-item .label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: rgba(255,255,255,0.4);
+    margin-bottom: 6px;
+  }
+
+  .cover-meta-item .value {
+    font-size: 15px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.9);
+  }
+
+  .cover-footer {
+    position: absolute;
+    bottom: 32px;
+    left: 0; right: 0;
+    text-align: center;
+    font-size: 11px;
+    color: rgba(255,255,255,0.25);
+    letter-spacing: 1px;
+  }
+
+  /* ── LAYOUT ───────────────────────────────────────────────────── */
+  .container {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 48px 32px;
+  }
+
+  /* ── SECTION ──────────────────────────────────────────────────── */
+  section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 32px;
+    margin-bottom: 28px;
+  }
+
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .section-icon {
+    width: 36px; height: 36px;
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 17px;
+    flex-shrink: 0;
+  }
+
+  .icon-purple { background: rgba(108,99,255,0.2); }
+  .icon-blue   { background: rgba(0,212,255,0.15); }
+  .icon-green  { background: rgba(0,230,118,0.15); }
+  .icon-red    { background: rgba(255,107,107,0.15); }
+  .icon-yellow { background: rgba(255,215,64,0.15); }
+  .icon-pink   { background: rgba(255,100,180,0.15); }
+
+  .section-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text);
+  }
+
+  .section-number {
+    font-size: 11px;
+    color: var(--muted);
+    font-weight: 400;
+    margin-top: 1px;
+  }
+
+  /* ── HEADINGS ─────────────────────────────────────────────────── */
+  h2 { font-size: 14px; font-weight: 600; color: var(--accent2); margin: 20px 0 10px; text-transform: uppercase; letter-spacing: 1px; }
+  h3 { font-size: 13px; font-weight: 600; color: var(--text); margin: 16px 0 8px; }
+  p  { color: var(--muted); margin-bottom: 10px; line-height: 1.8; }
+  .muted { color: var(--muted); }
+
+  /* ── BADGES ───────────────────────────────────────────────────── */
+  .badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 100px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+  }
+  .badge-green  { background: rgba(0,230,118,0.15); color: #00e676; border: 1px solid rgba(0,230,118,0.3); }
+  .badge-blue   { background: rgba(0,212,255,0.15); color: #00d4ff; border: 1px solid rgba(0,212,255,0.3); }
+  .badge-purple { background: rgba(108,99,255,0.2); color: #a78bfa; border: 1px solid rgba(108,99,255,0.4); }
+  .badge-red    { background: rgba(255,107,107,0.15); color: #ff6b6b; border: 1px solid rgba(255,107,107,0.3); }
+  .badge-yellow { background: rgba(255,215,64,0.15); color: #ffd740; border: 1px solid rgba(255,215,64,0.3); }
+
+  /* ── TABLE ────────────────────────────────────────────────────── */
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+  th {
+    text-align: left; padding: 10px 14px;
+    background: var(--surface2);
+    color: var(--muted);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    border-bottom: 1px solid var(--border);
+  }
+  td {
+    padding: 10px 14px;
+    border-bottom: 1px solid rgba(42,45,58,0.5);
+    vertical-align: top;
+    color: var(--text);
+    font-size: 12px;
+  }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+
+  /* ── CODE ─────────────────────────────────────────────────────── */
+  code {
+    font-family: 'JetBrains Mono', monospace;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 2px 7px;
+    font-size: 11px;
+    color: #c9d1d9;
+  }
+
+  pre {
+    font-family: 'JetBrains Mono', monospace;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    font-size: 11.5px;
+    overflow-x: auto;
+    line-height: 1.8;
+    margin: 12px 0;
+    color: #c9d1d9;
+  }
+
+  .kw  { color: #ff79c6; }
+  .str { color: #f1fa8c; }
+  .cm  { color: #6272a4; font-style: italic; }
+  .fn  { color: #50fa7b; }
+  .num { color: #bd93f9; }
+  .cls { color: #8be9fd; }
+
+  /* ── FILE TREE ────────────────────────────────────────────────── */
+  .tree {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    line-height: 2;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 24px;
+  }
+
+  .tree-dir  { color: #60a5fa; font-weight: 600; }
+  .tree-file { color: #c9d1d9; }
+  .tree-new  { color: #00e676; }
+  .tree-copy { color: #ffd740; }
+  .tree-line { color: #3a3d4a; }
+  .tree-note { color: #6272a4; font-size: 10px; }
+
+  /* ── HIGHLIGHT BOXES ──────────────────────────────────────────── */
+  .callout {
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin: 12px 0;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+  }
+  .callout-icon { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
+  .callout-body { flex: 1; font-size: 12.5px; }
+  .callout-body strong { display: block; font-weight: 600; margin-bottom: 4px; color: var(--text); }
+  .callout-body span { color: var(--muted); line-height: 1.7; }
+
+  .callout-green  { background: rgba(0,230,118,0.07); border: 1px solid rgba(0,230,118,0.2); }
+  .callout-blue   { background: rgba(0,212,255,0.07); border: 1px solid rgba(0,212,255,0.2); }
+  .callout-purple { background: rgba(108,99,255,0.1); border: 1px solid rgba(108,99,255,0.3); }
+  .callout-red    { background: rgba(255,107,107,0.07); border: 1px solid rgba(255,107,107,0.2); }
+  .callout-yellow { background: rgba(255,215,64,0.07); border: 1px solid rgba(255,215,64,0.2); }
+
+  /* ── DIFF TABLE ───────────────────────────────────────────────── */
+  .diff-table table { font-family: 'JetBrains Mono', monospace; font-size: 11.5px; }
+  .diff-old { color: #ff6b6b; text-decoration: line-through; }
+  .diff-new { color: #00e676; font-weight: 600; }
+
+  /* ── STAT CARDS ───────────────────────────────────────────────── */
+  .stat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 14px;
+    margin: 16px 0;
+  }
+
+  .stat-card {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 16px;
+    text-align: center;
+  }
+
+  .stat-card .num {
+    font-size: 28px;
+    font-weight: 800;
+    background: linear-gradient(135deg, #a78bfa, #60a5fa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    line-height: 1.2;
+  }
+
+  .stat-card .label {
+    font-size: 10px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-top: 6px;
+  }
+
+  /* ── CHECKLIST ────────────────────────────────────────────────── */
+  .checklist { list-style: none; }
+  .checklist li {
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(42,45,58,0.4);
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+  .checklist li:last-child { border-bottom: none; }
+  .checklist li .check { color: #00e676; font-weight: 700; flex-shrink: 0; margin-top: 1px; }
+  .checklist li strong { color: var(--text); }
+
+  /* ── TOC ──────────────────────────────────────────────────────── */
+  .toc { list-style: none; }
+  .toc li { 
+    display: flex; 
+    align-items: center; 
+    padding: 9px 0; 
+    border-bottom: 1px solid rgba(42,45,58,0.4); 
+    gap: 12px;
+  }
+  .toc li:last-child { border-bottom: none; }
+  .toc-num { 
+    width: 26px; height: 26px; 
+    background: var(--surface2); 
+    border-radius: 6px; 
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700; color: var(--accent);
+    flex-shrink: 0;
+  }
+  .toc-label { flex: 1; font-size: 12.5px; color: var(--text); }
+  .toc-dots { flex: 1; border-bottom: 1px dotted var(--border); margin: 0 8px; }
+  .toc-page { font-size: 11px; color: var(--muted); }
+
+  /* ── DIVIDER ──────────────────────────────────────────────────── */
+  .divider {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--border), transparent);
+    margin: 32px 0;
+  }
+
+  /* ── INSTRUCTION BOX ──────────────────────────────────────────── */
+  .instruction-box {
+    background: linear-gradient(135deg, rgba(108,99,255,0.08), rgba(0,212,255,0.05));
+    border: 1px solid rgba(108,99,255,0.3);
+    border-radius: 12px;
+    padding: 20px 24px;
+    margin: 16px 0;
+  }
+
+  .instruction-box h3 {
+    color: #a78bfa;
+    font-size: 13px;
+    margin-bottom: 12px;
+  }
+
+  /* ── PRINT BUTTON ─────────────────────────────────────────────── */
+  .print-btn {
+    position: fixed;
+    bottom: 32px; right: 32px;
+    background: linear-gradient(135deg, #6c63ff, #00d4ff);
+    color: white;
+    border: none;
+    border-radius: 100px;
+    padding: 14px 28px;
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 8px 32px rgba(108,99,255,0.4);
+    transition: all 0.2s;
+    z-index: 1000;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .print-btn:hover { transform: translateY(-2px); box-shadow: 0 12px 40px rgba(108,99,255,0.5); }
+
+</style>
+</head>
+<body>
+
+<!-- ───────────────────────────── COVER ───────────────────────────────── -->
+<div class="cover">
+  <div class="cover-badge">Project Reference Document · v1.0</div>
+  <div class="cover-logo">AirSpace</div>
+  <div class="cover-sub">Secure Local File Sharing Platform for macOS</div>
+
+  <div class="cover-meta">
+    <div class="cover-meta-item">
+      <div class="label">App ID</div>
+      <div class="value">com.airspace.desktop</div>
+    </div>
+    <div class="cover-meta-item">
+      <div class="label">Platform</div>
+      <div class="value">macOS · Electron 42</div>
+    </div>
+    <div class="cover-meta-item">
+      <div class="label">Architecture</div>
+      <div class="value">arm64 (Apple Silicon)</div>
+    </div>
+    <div class="cover-meta-item">
+      <div class="label">Build Date</div>
+      <div class="value">June 15, 2026</div>
+    </div>
+    <div class="cover-meta-item">
+      <div class="label">Stack</div>
+      <div class="value">Electron + React + Vite</div>
+    </div>
+    <div class="cover-meta-item">
+      <div class="label">Bonjour Service</div>
+      <div class="value">_airspace._tcp</div>
+    </div>
+  </div>
+
+  <div class="cover-footer">
+    Migrated from OrbitalShare (com.neardrop.app) · For AI handover use
+  </div>
+</div>
+
+<!-- ────────────────────────── MAIN CONTENT ───────────────────────────── -->
+<div class="container">
+
+  <!-- 1. TABLE OF CONTENTS -->
+  <section>
+    <div class="section-header">
+      <div class="section-icon icon-purple">📋</div>
+      <div>
+        <div class="section-title">Table of Contents</div>
+        <div class="section-number">What's inside this document</div>
+      </div>
+    </div>
+    <ul class="toc">
+      <li><div class="toc-num">1</div><span class="toc-label">The Problem & The Solution</span><span class="toc-dots"></span><span class="toc-page">§1</span></li>
+      <li><div class="toc-num">2</div><span class="toc-label">Project Locations & Paths</span><span class="toc-dots"></span><span class="toc-page">§2</span></li>
+      <li><div class="toc-num">3</div><span class="toc-label">Complete Folder Structure (Tree)</span><span class="toc-dots"></span><span class="toc-page">§3</span></li>
+      <li><div class="toc-num">4</div><span class="toc-label">Every File — What It Does</span><span class="toc-dots"></span><span class="toc-page">§4</span></li>
+      <li><div class="toc-num">5</div><span class="toc-label">What Was Created vs Copied</span><span class="toc-dots"></span><span class="toc-page">§5</span></li>
+      <li><div class="toc-num">6</div><span class="toc-label">Key Code Written — Exact Quotes</span><span class="toc-dots"></span><span class="toc-page">§6</span></li>
+      <li><div class="toc-num">7</div><span class="toc-label">Identity Change Summary (Diff)</span><span class="toc-dots"></span><span class="toc-page">§7</span></li>
+      <li><div class="toc-num">8</div><span class="toc-label">Build Results & Artifacts</span><span class="toc-dots"></span><span class="toc-page">§8</span></li>
+      <li><div class="toc-num">9</div><span class="toc-label">How to Verify It Works</span><span class="toc-dots"></span><span class="toc-page">§9</span></li>
+      <li><div class="toc-num">10</div><span class="toc-label">How to Continue Working (for AI)</span><span class="toc-dots"></span><span class="toc-page">§10</span></li>
+    </ul>
+  </section>
+
+
+  <!-- 2. PROBLEM & SOLUTION -->
+  <section>
+    <div class="section-header">
+      <div class="section-icon icon-red">⚡</div>
+      <div>
+        <div class="section-title">§1 — The Problem & The Solution</div>
+        <div class="section-number">Why this migration was done</div>
+      </div>
+    </div>
+
+    <div class="callout callout-red">
+      <div class="callout-icon">🚫</div>
+      <div class="callout-body">
+        <strong>The Problem</strong>
+        <span>The old app bundle identifier <code>com.neardrop.app</code> was silently blacklisted/quarantined by macOS security policies because it used ad-hoc signing profiles. macOS was blocking all local network access without ever showing a permission prompt — making the app unable to discover or connect to nearby devices on the LAN. There was no way to fix this without a completely fresh identity.</span>
+      </div>
+    </div>
+
+    <div class="callout callout-green">
+      <div class="callout-icon">✅</div>
+      <div class="callout-body">
+        <strong>The Solution</strong>
+        <span>A brand-new Electron app was created at <code>/Users/suyesh/Desktop/Airspace</code> with a pristine App ID <code>com.airspace.desktop</code>. When macOS sees this new ID for the first time, it will show a fresh Local Network permission prompt. The full frontend UI, animations, and logic were migrated verbatim — only the identity strings were changed.</span>
+      </div>
+    </div>
+
+    <table>
+      <tr><th>Item</th><th>Old (Blocked)</th><th>New (Fresh)</th></tr>
+      <tr><td>Bundle ID</td><td><code>com.neardrop.app</code></td><td><code>com.airspace.desktop</code></td></tr>
+      <tr><td>Product Name</td><td>NearDrop</td><td>AirSpace</td></tr>
+      <tr><td>Bonjour Service</td><td><code>_orbitalshare._tcp</code></td><td><code>_airspace._tcp</code></td></tr>
+      <tr><td>Source Folder</td><td><code>/Desktop/OrbitalShare</code></td><td><code>/Desktop/Airspace</code></td></tr>
+      <tr><td>macOS Permission</td><td>❌ Silently blocked</td><td>✅ Fresh prompt on first launch</td></tr>
+    </table>
+  </section>
+
+
+  <!-- 3. PROJECT PATHS -->
+  <section>
+    <div class="section-header">
+      <div class="section-icon icon-blue">📍</div>
+      <div>
+        <div class="section-title">§2 — Project Locations & Key Paths</div>
+        <div class="section-number">Where everything lives on disk</div>
+      </div>
+    </div>
+
+    <table>
+      <tr><th>What</th><th>Path</th></tr>
+      <tr><td><strong>Project Root</strong></td><td><code>/Users/suyesh/Desktop/Airspace/</code></td></tr>
+      <tr><td><strong>Old Source (read-only ref)</strong></td><td><code>/Users/suyesh/Desktop/OrbitalShare/</code></td></tr>
+      <tr><td><strong>Electron Main Process</strong></td><td><code>/Users/suyesh/Desktop/Airspace/electron/main.cjs</code></td></tr>
+      <tr><td><strong>Electron Preload</strong></td><td><code>/Users/suyesh/Desktop/Airspace/electron/preload.cjs</code></td></tr>
+      <tr><td><strong>React Entry</strong></td><td><code>/Users/suyesh/Desktop/Airspace/src/main.tsx</code></td></tr>
+      <tr><td><strong>App Root Component</strong></td><td><code>/Users/suyesh/Desktop/Airspace/src/App.tsx</code></td></tr>
+      <tr><td><strong>WebSocket Server</strong></td><td><code>/Users/suyesh/Desktop/Airspace/server/server.js</code></td></tr>
+      <tr><td><strong>Built Frontend</strong></td><td><code>/Users/suyesh/Desktop/Airspace/dist/</code></td></tr>
+      <tr><td><strong>Release App Bundle</strong></td><td><code>/Users/suyesh/Desktop/Airspace/release/mac-arm64/AirSpace.app</code></td></tr>
+      <tr><td><strong>DMG Installer</strong></td><td><code>/Users/suyesh/Desktop/Airspace/release/AirSpace-1.0.0-arm64.dmg</code></td></tr>
+      <tr><td><strong>App Icons / Logo</strong></td><td><code>/Users/suyesh/Desktop/Airspace/src/assets/logo/</code></td></tr>
+      <tr><td><strong>Build Assets (icns, plists)</strong></td><td><code>/Users/suyesh/Desktop/Airspace/build/</code></td></tr>
+    </table>
+  </section>
+
+
+  <!-- 4. FOLDER STRUCTURE -->
+  <section>
+    <div class="section-header">
+      <div class="section-icon icon-yellow">🗂️</div>
+      <div>
+        <div class="section-title">§3 — Complete Folder Structure</div>
+        <div class="section-number">Full directory tree (node_modules excluded) · <span style="color:#00e676">Green = newly written</span> · <span style="color:#ffd740">Yellow = copied from OrbitalShare</span></div>
+      </div>
+    </div>
+
+    <div class="tree">
+<span class="tree-dir">Airspace/</span>
+<span class="tree-line">├── </span><span class="tree-new">package.json</span>               <span class="tree-note">← WRITTEN: fresh com.airspace.desktop identity + full deps</span>
+<span class="tree-line">├── </span><span class="tree-new">index.html</span>                 <span class="tree-note">← WRITTEN: title changed to "AirSpace"</span>
+<span class="tree-line">├── </span><span class="tree-copy">vite.config.ts</span>             <span class="tree-note">← WRITTEN: identical to source (React + Tailwind plugin)</span>
+<span class="tree-line">├── </span><span class="tree-copy">tsconfig.json</span>              <span class="tree-note">← WRITTEN: root tsconfig references app + node</span>
+<span class="tree-line">├── </span><span class="tree-copy">tsconfig.app.json</span>          <span class="tree-note">← WRITTEN: React/JSX compiler options</span>
+<span class="tree-line">├── </span><span class="tree-copy">tsconfig.node.json</span>         <span class="tree-note">← WRITTEN: Node/Vite config compiler options</span>
+<span class="tree-line">├── </span><span class="tree-copy">components.json</span>            <span class="tree-note">← COPIED: shadcn/ui configuration</span>
+<span class="tree-line">│</span>
+<span class="tree-line">├── </span><span class="tree-dir">electron/</span>
+<span class="tree-line">│   ├── </span><span class="tree-new">main.cjs</span>               <span class="tree-note">← WRITTEN: rewritten with AirSpace identity + _airspace._tcp</span>
+<span class="tree-line">│   └── </span><span class="tree-copy">preload.cjs</span>            <span class="tree-note">← COPIED: IPC bridge (orbitalshare: channels intact)</span>
+<span class="tree-line">│</span>
+<span class="tree-line">├── </span><span class="tree-dir">build/</span>
+<span class="tree-line">│   ├── </span><span class="tree-copy">icon.icns</span>              <span class="tree-note">← COPIED: macOS app icon</span>
+<span class="tree-line">│   ├── </span><span class="tree-copy">entitlements.mac.plist</span>         <span class="tree-note">← COPIED: JIT + unsigned memory + no lib validation</span>
+<span class="tree-line">│   └── </span><span class="tree-copy">entitlements.mac.inherit.plist</span> <span class="tree-note">← COPIED: same for helper processes</span>
+<span class="tree-line">│</span>
+<span class="tree-line">├── </span><span class="tree-dir">src/</span>
+<span class="tree-line">│   ├── </span><span class="tree-copy">main.tsx</span>               <span class="tree-note">← COPIED: React entry point</span>
+<span class="tree-line">│   ├── </span><span class="tree-copy">App.tsx</span>                <span class="tree-note">← COPIED: Root app component</span>
+<span class="tree-line">│   ├── </span><span class="tree-copy">index.css</span>              <span class="tree-note">← COPIED: Global styles (22 KB, 800+ lines)</span>
+<span class="tree-line">│   ├── </span><span class="tree-copy">App.css</span>                <span class="tree-note">← COPIED: App-level styles</span>
+<span class="tree-line">│   │</span>
+<span class="tree-line">│   ├── </span><span class="tree-dir">assets/logo/</span>           <span class="tree-note">← COPIED: All icon assets</span>
+<span class="tree-line">│   │   ├── </span><span class="tree-copy">neardrop-app-icon-1024.png</span>
+<span class="tree-line">│   │   ├── </span><span class="tree-copy">neardrop-app-icon.png</span>
+<span class="tree-line">│   │   ├── </span><span class="tree-copy">neardrop-logo.png</span>
+<span class="tree-line">│   │   ├── </span><span class="tree-copy">neardrop-tray-icon-template.png</span>
+<span class="tree-line">│   │   ├── </span><span class="tree-copy">neardrop-tray-icon-off-template.png</span>
+<span class="tree-line">│   │   ├── </span><span class="tree-copy">neardrop-tray-icon-visible.png</span>
+<span class="tree-line">│   │   ├── </span><span class="tree-copy">neardrop-tray-icon-off-visible.png</span>
+<span class="tree-line">│   │   └── </span><span class="tree-copy">neardrop-tray-icon-128.png</span>
+<span class="tree-line">│   │</span>
+<span class="tree-line">│   ├── </span><span class="tree-dir">components/</span>            <span class="tree-note">← COPIED: All UI components (16 sub-folders)</span>
+<span class="tree-line">│   │   ├── </span><span class="tree-copy">app/</span>               <span class="tree-note">App-level wrappers</span>
+<span class="tree-line">│   │   ├── </span><span class="tree-copy">buttons/</span>           <span class="tree-note">Button components</span>
+<span class="tree-line">│   │   ├── </span><span class="tree-copy">cards/</span>             <span class="tree-note">Card UI components</span>
+<span class="tree-line">│   │   ├── </span><span class="tree-copy">common/</span>            <span class="tree-note">Shared common components</span>
+<span class="tree-line">│   │   ├── </span><span class="tree-copy">debug/</span>             <span class="tree-note">Debug/dev panel components</span>
+<span class="tree-line">│   │   ├── </span><span class="tree-copy">discovery/</span>         <span class="tree-note">LAN discovery UI (radar, rings, particles)</span>
+<span class="tree-line">│   │   │   ├── </span><span class="tree-copy">DeviceCard.tsx</span>
+<span class="tree-line">│   │   │   ├── </span><span class="tree-copy">DiscoveryHeader.tsx</span>
+<span class="tree-line">│   │   │   ├── </span><span class="tree-copy">DiscoveryList.tsx</span>
+<span class="tree-line">│   │   │   ├── </span><span class="tree-copy">OrbitAmbientParticles.tsx</span>
+<span class="tree-line">│   │   │   ├── </span><span class="tree-copy">OrbitRings.tsx</span>
+<span class="tree-line">│   │   │   ├── </span><span class="tree-copy">OrbitScanner.tsx</span>
+<span class="tree-line">│   │   │   ├── </span><span class="tree-copy">OrbitalRadar.tsx</span>
+<span class="tree-line">│   │   │   └── </span><span class="tree-copy">RippleBackground.tsx</span>
+<span class="tree-line">│   │   ├── </span><span class="tree-copy">files/</span>             <span class="tree-note">File drag/drop overlay components</span>
+<span class="tree-line">│   │   ├── </span><span class="tree-copy">home/</span>              <span class="tree-note">Home page hero, orbit, glow effects</span>
+<span class="tree-line">│   │   ├── </span><span class="tree-copy">layout/</span>            <span class="tree-note">AppWindow, BackgroundGlow, PageTransition</span>
+<span class="tree-line">│   │   ├── </span><span class="tree-copy">profile/</span>           <span class="tree-note">User profile avatar, dropdown</span>
+<span class="tree-line">│   │   ├── </span><span class="tree-copy">receiver/</span>          <span class="tree-note">Receiver discovery pulse animation</span>
+<span class="tree-line">│   │   ├── </span><span class="tree-copy">routing/</span>           <span class="tree-note">SessionGuard route protection</span>
+<span class="tree-line">│   │   ├── </span><span class="tree-copy">shared/</span>            <span class="tree-note">Reusable: BackButton, FileCard, GlowButton, Logo</span>
+<span class="tree-line">│   │   ├── </span><span class="tree-copy">transfer/</span>          <span class="tree-note">Transfer modal, progress bars, file list</span>
+<span class="tree-line">│   │   ├── </span><span class="tree-copy">trust/</span>             <span class="tree-note">Trust inbox, trusted device badge</span>
+<span class="tree-line">│   │   └── </span><span class="tree-copy">ui/</span>                <span class="tree-note">shadcn/ui button primitive</span>
+<span class="tree-line">│   │</span>
+<span class="tree-line">│   ├── </span><span class="tree-dir">pages/</span>                 <span class="tree-note">← COPIED: All route pages</span>
+<span class="tree-line">│   │   ├── </span><span class="tree-copy">Home/HomePage.tsx</span>
+<span class="tree-line">│   │   ├── </span><span class="tree-copy">Discovery/DiscoveryPage.tsx</span>  <span class="tree-note">Sender: scan LAN for receivers</span>
+<span class="tree-line">│   │   ├── </span><span class="tree-copy">SelectFiles/SelectFilesPage.tsx</span>
+<span class="tree-line">│   │   ├── </span><span class="tree-copy">Transfer/TransferPage.tsx</span>
+<span class="tree-line">│   │   ├── </span><span class="tree-copy">Waiting/WaitingPage.tsx</span>     <span class="tree-note">Receiver: waiting for incoming files</span>
+<span class="tree-line">│   │   └── </span><span class="tree-copy">TrayTogglePage.tsx</span>
+<span class="tree-line">│   │</span>
+<span class="tree-line">│   ├── </span><span class="tree-dir">context/</span>               <span class="tree-note">← COPIED: React context providers</span>
+<span class="tree-line">│   ├── </span><span class="tree-dir">hooks/</span>                 <span class="tree-note">← COPIED: Custom React hooks</span>
+<span class="tree-line">│   │   ├── </span><span class="tree-copy">useDeviceIdentity.ts</span>   <span class="tree-note">Generates/persists local device UUID + username</span>
+<span class="tree-line">│   │   └── </span><span class="tree-copy">useFileDragState.ts</span>
+<span class="tree-line">│   ├── </span><span class="tree-dir">lib/</span>                   <span class="tree-note">← COPIED: Business logic utilities (22 files)</span>
+<span class="tree-line">│   │   ├── </span><span class="tree-copy">electron.ts</span>            <span class="tree-note">Safe accessor for window.orbitalShareDesktop IPC API</span>
+<span class="tree-line">│   │   ├── </span><span class="tree-copy">transferBinaryProtocol.ts</span>
+<span class="tree-line">│   │   ├── </span><span class="tree-copy">trustedDevices.ts</span>
+<span class="tree-line">│   │   └── </span><span class="tree-copy">... 19 more transfer/session/security libs</span>
+<span class="tree-line">│   ├── </span><span class="tree-dir">services/</span>              <span class="tree-note">← COPIED: Discovery + transfer + WebSocket services</span>
+<span class="tree-line">│   ├── </span><span class="tree-dir">store/</span>                 <span class="tree-note">← COPIED: Zustand state stores</span>
+<span class="tree-line">│   │   ├── </span><span class="tree-copy">useTransferStore.ts</span>
+<span class="tree-line">│   │   └── </span><span class="tree-copy">useTrustInboxStore.ts</span>
+<span class="tree-line">│   ├── </span><span class="tree-dir">router/</span>                <span class="tree-note">← COPIED: AppRouter.tsx</span>
+<span class="tree-line">│   ├── </span><span class="tree-dir">routes/</span>                <span class="tree-note">← COPIED: AppRoutes.tsx</span>
+<span class="tree-line">│   ├── </span><span class="tree-dir">styles/</span>                <span class="tree-note">← COPIED: Additional CSS modules</span>
+<span class="tree-line">│   ├── </span><span class="tree-dir">types/</span>                 <span class="tree-note">← COPIED: TypeScript type definitions</span>
+<span class="tree-line">│   │   ├── </span><span class="tree-copy">device.ts</span>
+<span class="tree-line">│   │   └── </span><span class="tree-copy">websocket.ts</span>
+<span class="tree-line">│   ├── </span><span class="tree-dir">animations/</span>            <span class="tree-note">← COPIED: CSS/JS animation definitions</span>
+<span class="tree-line">│   └── </span><span class="tree-dir">utils/</span>                 <span class="tree-note">← COPIED: device.ts, discovery.ts, orbitalPlacement.ts</span>
+<span class="tree-line">│</span>
+<span class="tree-line">├── </span><span class="tree-dir">server/</span>                    <span class="tree-note">← COPIED: Local WebSocket relay server (26 files)</span>
+<span class="tree-line">│   ├── </span><span class="tree-copy">server.js</span>              <span class="tree-note">Entry — starts ws server on port 8080</span>
+<span class="tree-line">│   ├── </span><span class="tree-copy">transferHandlers.js</span>    <span class="tree-note">Core file transfer logic (17 KB)</span>
+<span class="tree-line">│   ├── </span><span class="tree-copy">transferSessions.js</span>    <span class="tree-note">Session state management</span>
+<span class="tree-line">│   ├── </span><span class="tree-copy">websocketHandlers.js</span>   <span class="tree-note">WS message routing</span>
+<span class="tree-line">│   ├── </span><span class="tree-copy">deviceRegistry.js</span>      <span class="tree-note">Connected device tracking</span>
+<span class="tree-line">│   └── </span><span class="tree-copy">... 21 more security/validation/rate-limit modules</span>
+<span class="tree-line">│</span>
+<span class="tree-line">├── </span><span class="tree-dir">scripts/</span>
+<span class="tree-line">│   └── </span><span class="tree-copy">normalize-mac-identity.cjs</span> <span class="tree-note">← COPIED: post-pack electron-builder hook</span>
+<span class="tree-line">│</span>
+<span class="tree-line">├── </span><span class="tree-dir">public/</span>
+<span class="tree-line">│   ├── </span><span class="tree-copy">favicon.svg</span>
+<span class="tree-line">│   └── </span><span class="tree-copy">icons.svg</span>
+<span class="tree-line">│</span>
+<span class="tree-line">├── </span><span class="tree-dir">dist/</span>                      <span class="tree-note">← AUTO-GENERATED: Vite production build output</span>
+<span class="tree-line">│   ├── index.html
+│   └── assets/               (JS bundle 522KB, CSS 90KB, fonts, images)</span>
+<span class="tree-line">│</span>
+<span class="tree-line">└── </span><span class="tree-dir">release/</span>                   <span class="tree-note">← AUTO-GENERATED: electron-builder output</span>
+<span class="tree-line">    ├── mac-arm64/AirSpace.app
+    ├── AirSpace-1.0.0-arm64.dmg
+    └── AirSpace-1.0.0-arm64.zip</span>
+    </div>
+  </section>
+
+
+  <!-- 5. WHAT WAS CREATED VS COPIED -->
+  <section>
+    <div class="section-header">
+      <div class="section-icon icon-green">🆚</div>
+      <div>
+        <div class="section-title">§5 — What Was Created vs Copied</div>
+        <div class="section-number">Every file accounted for</div>
+      </div>
+    </div>
+
+    <h2>Newly Written Files <span class="badge badge-green">CREATED</span></h2>
+    <table>
+      <tr><th>File</th><th>Why it was written fresh</th></tr>
+      <tr><td><code>package.json</code></td><td>Needed fresh <code>appId: com.airspace.desktop</code>, updated productName, full dep list, correct Bonjour service in Info.plist extendInfo</td></tr>
+      <tr><td><code>electron/main.cjs</code></td><td>Core identity swap — BONJOUR_SERVICE_TYPE, APP_NAME, notification IDs, tray labels all updated. IPC channels preserved.</td></tr>
+      <tr><td><code>index.html</code></td><td>Updated <code>&lt;title&gt;</code> from NearDrop to AirSpace</td></tr>
+      <tr><td><code>vite.config.ts</code></td><td>Written fresh (identical content) to avoid any cached config fingerprint</td></tr>
+      <tr><td><code>tsconfig.json</code></td><td>Written fresh</td></tr>
+      <tr><td><code>tsconfig.app.json</code></td><td>Written fresh</td></tr>
+      <tr><td><code>tsconfig.node.json</code></td><td>Written fresh</td></tr>
+    </table>
+
+    <h2 style="margin-top:20px">Copied Verbatim from OrbitalShare <span class="badge badge-yellow">COPIED</span></h2>
+    <table>
+      <tr><th>What</th><th>Path</th><th>Note</th></tr>
+      <tr><td>React Frontend (<code>src/</code>)</td><td><code>src/</code> entire subtree</td><td>All pages, components, hooks, stores — zero modifications</td></tr>
+      <tr><td>IPC Bridge</td><td><code>electron/preload.cjs</code></td><td>Exposes <code>window.orbitalShareDesktop</code> — untouched</td></tr>
+      <tr><td>WebSocket Server</td><td><code>server/</code> (26 files)</td><td>Local relay server for file chunks — zero modifications</td></tr>
+      <tr><td>Build Assets</td><td><code>build/icon.icns</code>, <code>build/*.plist</code></td><td>App icon and entitlements</td></tr>
+      <tr><td>Post-pack Script</td><td><code>scripts/normalize-mac-identity.cjs</code></td><td>electron-builder hook</td></tr>
+      <tr><td>Public Assets</td><td><code>public/favicon.svg</code>, <code>public/icons.svg</code></td><td>Static assets</td></tr>
+      <tr><td>Shadcn Config</td><td><code>components.json</code></td><td>UI component configuration</td></tr>
+    </table>
+  </section>
+
+
+  <!-- 6. KEY CODE QUOTES -->
+  <section class="page-break">
+    <div class="section-header">
+      <div class="section-icon icon-purple">💻</div>
+      <div>
+        <div class="section-title">§6 — Key Code Written — Exact Quotes</div>
+        <div class="section-number">The most important lines in the new codebase</div>
+      </div>
+    </div>
+
+    <h2>6.1 — Identity Constants (electron/main.cjs lines 22–28)</h2>
+    <p>These 6 lines are the heart of the entire migration. They define the new clean identity:</p>
+    <pre><span class="cm">// The Bonjour service type — advertised/browsed on the LAN via native dnssd</span>
+<span class="kw">const</span> <span class="cls">BONJOUR_SERVICE_TYPE</span> = <span class="str">"airspace"</span>;      <span class="cm">// → publishes _airspace._tcp</span>
+
+<span class="kw">const</span> <span class="cls">APP_NAME</span> = <span class="str">"AirSpace"</span>;                  <span class="cm">// → tray menus, window title, notifications</span>
+
+<span class="kw">const</span> <span class="cls">TRAY_POPUP_ARG</span> = <span class="str">"--airspace-tray-popup"</span>;
+<span class="kw">const</span> <span class="cls">HIDDEN_RUNTIME_ARG</span> = <span class="str">"--airspace-hidden-runtime"</span>;
+<span class="kw">const</span> <span class="cls">TRAY_GUID</span> = <span class="str">"a1b2c3d4-e5f6-7890-abcd-ef1234567890"</span>;  <span class="cm">// fresh GUID</span></pre>
+
+    <h2>6.2 — Native dnssd Advertisement (Receiver Mode)</h2>
+    <p>When a user enables Receiver mode, this code publishes the device on the LAN via native C++:</p>
+    <pre><span class="cm">// Native dnssd.Advertisement — registers _airspace._tcp on the LAN</span>
+<span class="fn">publishedReceiverAd</span> = <span class="kw">new</span> dnssd.<span class="cls">Advertisement</span>(
+  dnssd.<span class="fn">tcp</span>(<span class="cls">BONJOUR_SERVICE_TYPE</span>),  <span class="cm">// → _airspace._tcp</span>
+  <span class="cls">LOCAL_WEBSOCKET_PORT</span>,             <span class="cm">// → port 8080</span>
+  {
+    name: <span class="str">`<span class="cls">${APP_NAME}</span> <span class="cls">${deviceId}</span>`</span>,
+    txt: {
+      available: <span class="str">"1"</span>,
+      deviceId,
+      username,
+      deviceType,
+      platform,
+    },
+  }
+);
+publishedReceiverAd.<span class="fn">start</span>();</pre>
+
+    <h2>6.3 — Native dnssd Browser (Sender/Discovery Mode)</h2>
+    <p>When the user opens Discovery mode, this scans the LAN for other AirSpace instances:</p>
+    <pre><span class="cm">// Native dnssd.Browser — bypasses JS-layer Bonjour blocks</span>
+dnssdBrowser = <span class="kw">new</span> dnssd.<span class="cls">Browser</span>(dnssd.<span class="fn">tcp</span>(<span class="cls">BONJOUR_SERVICE_TYPE</span>));
+
+dnssdBrowser.<span class="fn">on</span>(<span class="str">"serviceUp"</span>, (service) => {
+  <span class="cm">// ← CRITICAL: alias fullname → fqdn so the frontend Map key works</span>
+  <span class="fn">upsertLanReceiver</span>({ ...service, fqdn: service.fullname });
+});
+
+dnssdBrowser.<span class="fn">on</span>(<span class="str">"serviceDown"</span>, (service) => {
+  <span class="fn">removeLanReceiver</span>({ ...service, fqdn: service.fullname });
+});
+
+dnssdBrowser.<span class="fn">start</span>();</pre>
+
+    <h2>6.4 — IPC Channels (PRESERVED — not changed)</h2>
+    <p>All IPC channel names kept as <code>orbitalshare:</code> — they are internal strings, NOT network identifiers:</p>
+    <pre><span class="cm">// All channel names preserved exactly — frontend depends on these strings</span>
+ipcMain.<span class="fn">handle</span>(<span class="str">"orbitalshare:get-lan-receivers"</span>,    () => <span class="fn">getLanReceiverSnapshot</span>());
+ipcMain.<span class="fn">handle</span>(<span class="str">"orbitalshare:set-receiver-presence"</span>, (_event, presence) => ...);
+ipcMain.<span class="fn">handle</span>(<span class="str">"orbitalshare:set-lan-discovery-active"</span>, ...);
+ipcMain.<span class="fn">handle</span>(<span class="str">"orbitalshare:notify-incoming-transfer"</span>, ...);
+<span class="cm">// ... 8 more handlers — all orbitalshare: prefixed, all unchanged</span>
+
+<span class="cm">// IPC broadcasts to renderer also unchanged:</span>
+<span class="fn">sendToRenderer</span>(<span class="str">"orbitalshare:lan-receivers"</span>, snapshot);
+<span class="fn">sendToRenderer</span>(<span class="str">"orbitalshare:lan-discovery-error"</span>, lastLanDiscoveryError);</pre>
+
+    <h2>6.5 — Lifecycle Cleanup (Resource Management)</h2>
+    <p>Properly unregisters all native dnssd instances on quit:</p>
+    <pre>app.<span class="fn">on</span>(<span class="str">"before-quit"</span>, () => {
+  isQuitting = <span class="kw">true</span>;
+  <span class="fn">stopPublishedReceiverService</span>();  <span class="cm">// stops Advertisement</span>
+  <span class="fn">stopBonjourDiscovery</span>();           <span class="cm">// stops Browser</span>
+  <span class="fn">stopLanReceiverSweep</span>();           <span class="cm">// clears stale-receiver timer</span>
+  localNetworkingStarted = <span class="kw">false</span>;
+  trayWindow?.<span class="fn">destroy</span>();
+  tray?.<span class="fn">destroy</span>();
+});</pre>
+
+    <h2>6.6 — Package.json: App ID Injection (the key lines)</h2>
+    <pre>{
+  <span class="str">"name"</span>: <span class="str">"airspace"</span>,
+  <span class="str">"build"</span>: {
+    <span class="str">"appId"</span>: <span class="str">"com.airspace.desktop"</span>,       <span class="cm">// ← the clean identity</span>
+    <span class="str">"productName"</span>: <span class="str">"AirSpace"</span>,
+    <span class="str">"mac"</span>: {
+      <span class="str">"identity"</span>: <span class="kw">null</span>,                    <span class="cm">// ← ad-hoc (no cert needed)</span>
+      <span class="str">"hardenedRuntime"</span>: <span class="kw">false</span>,             <span class="cm">// ← allows native dnssd</span>
+      <span class="str">"extendInfo"</span>: {
+        <span class="str">"NSBonjourServices"</span>: [<span class="str">"_airspace._tcp"</span>],  <span class="cm">// ← tells macOS what to allow</span>
+        <span class="str">"NSLocalNetworkUsageDescription"</span>: <span class="str">"AirSpace requires local network..."</span>
+      }
+    }
+  }
+}</pre>
+  </section>
+
+
+  <!-- 7. IDENTITY DIFF -->
+  <section class="diff-table">
+    <div class="section-header">
+      <div class="section-icon icon-yellow">🔄</div>
+      <div>
+        <div class="section-title">§7 — Identity Change Summary</div>
+        <div class="section-number">Exactly what changed and why — nothing else was modified</div>
+      </div>
+    </div>
+
+    <table>
+      <tr><th>Property</th><th>Old Value (OrbitalShare)</th><th>New Value (AirSpace)</th><th>File</th></tr>
+      <tr>
+        <td>Bundle ID</td>
+        <td><span class="diff-old">com.neardrop.app</span></td>
+        <td><span class="diff-new">com.airspace.desktop</span></td>
+        <td><code>package.json</code></td>
+      </tr>
+      <tr>
+        <td>Product Name</td>
+        <td><span class="diff-old">NearDrop</span></td>
+        <td><span class="diff-new">AirSpace</span></td>
+        <td><code>package.json</code></td>
+      </tr>
+      <tr>
+        <td>Bonjour Service (network)</td>
+        <td><span class="diff-old">orbitalshare</span> → <code>_orbitalshare._tcp</code></td>
+        <td><span class="diff-new">airspace</span> → <code>_airspace._tcp</code></td>
+        <td><code>main.cjs</code>, <code>package.json</code></td>
+      </tr>
+      <tr>
+        <td>App Name constant</td>
+        <td><span class="diff-old">APP_NAME = "NearDrop"</span></td>
+        <td><span class="diff-new">APP_NAME = "AirSpace"</span></td>
+        <td><code>electron/main.cjs</code></td>
+      </tr>
+      <tr>
+        <td>Tray menu</td>
+        <td><span class="diff-old">"Open NearDrop"</span></td>
+        <td><span class="diff-new">"Open AirSpace"</span></td>
+        <td><code>electron/main.cjs</code></td>
+      </tr>
+      <tr>
+        <td>Notification group</td>
+        <td><span class="diff-old">neardrop-transfers</span></td>
+        <td><span class="diff-new">airspace-transfers</span></td>
+        <td><code>electron/main.cjs</code></td>
+      </tr>
+      <tr>
+        <td>Notification IDs</td>
+        <td><span class="diff-old">neardrop-incoming-*</span></td>
+        <td><span class="diff-new">airspace-incoming-*</span></td>
+        <td><code>electron/main.cjs</code></td>
+      </tr>
+      <tr>
+        <td>CLI args</td>
+        <td><span class="diff-old">--neardrop-tray-popup</span></td>
+        <td><span class="diff-new">--airspace-tray-popup</span></td>
+        <td><code>electron/main.cjs</code></td>
+      </tr>
+      <tr>
+        <td>TRAY_GUID</td>
+        <td><span class="diff-old">9f3d7b3e-8f70-...</span></td>
+        <td><span class="diff-new">a1b2c3d4-e5f6-...</span></td>
+        <td><code>electron/main.cjs</code></td>
+      </tr>
+      <tr>
+        <td>HTML title</td>
+        <td><span class="diff-old">&lt;title&gt;NearDrop&lt;/title&gt;</span></td>
+        <td><span class="diff-new">&lt;title&gt;AirSpace&lt;/title&gt;</span></td>
+        <td><code>index.html</code></td>
+      </tr>
+      <tr>
+        <td><strong>IPC Channels</strong></td>
+        <td><code>orbitalshare:*</code></td>
+        <td><code>orbitalshare:*</code> <span class="badge badge-green">UNCHANGED ✓</span></td>
+        <td>Both files</td>
+      </tr>
+      <tr>
+        <td><strong>Frontend UI</strong></td>
+        <td>All React components</td>
+        <td>Identical <span class="badge badge-green">UNCHANGED ✓</span></td>
+        <td><code>src/</code></td>
+      </tr>
+      <tr>
+        <td><strong>WebSocket server</strong></td>
+        <td>Full relay server</td>
+        <td>Identical <span class="badge badge-green">UNCHANGED ✓</span></td>
+        <td><code>server/</code></td>
+      </tr>
+    </table>
+  </section>
+
+
+  <!-- 8. BUILD RESULTS -->
+  <section>
+    <div class="section-header">
+      <div class="section-icon icon-green">📦</div>
+      <div>
+        <div class="section-title">§8 — Build Results & Artifacts</div>
+        <div class="section-number">Everything that ran and what it produced</div>
+      </div>
+    </div>
+
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="num">736</div>
+        <div class="label">npm packages installed</div>
+      </div>
+      <div class="stat-card">
+        <div class="num">0</div>
+        <div class="label">Vulnerabilities found</div>
+      </div>
+      <div class="stat-card">
+        <div class="num">2,241</div>
+        <div class="label">Modules transformed</div>
+      </div>
+      <div class="stat-card">
+        <div class="num">0</div>
+        <div class="label">TypeScript errors</div>
+      </div>
+      <div class="stat-card">
+        <div class="num">arm64</div>
+        <div class="label">dnssd compiled for</div>
+      </div>
+      <div class="stat-card">
+        <div class="num">42.4.0</div>
+        <div class="label">Electron version</div>
+      </div>
+    </div>
+
+    <h2>Commands Run (in order)</h2>
+    <pre><span class="cm"># Step 1 — Install all JavaScript dependencies</span>
+npm install
+<span class="cm"># → 736 packages, 0 vulnerabilities</span>
+
+<span class="cm"># Step 2 — Compile native dnssd C++ against Electron 42.4.0 headers</span>
+npx electron-builder install-app-deps
+<span class="cm"># → arch=arm64, completed successfully</span>
+
+<span class="cm"># Step 3 — TypeScript check + Vite production bundle</span>
+npm run build
+<span class="cm"># → tsc -b &amp;&amp; vite build → 2241 modules, 0 errors</span>
+
+<span class="cm"># Step 4 — Package into .app + DMG + ZIP</span>
+npx electron-builder --mac
+<span class="cm"># → release/mac-arm64/AirSpace.app ✅</span></pre>
+
+    <h2>Info.plist Verification (confirmed clean)</h2>
+    <pre><span class="cm"># Ran: defaults read ...AirSpace.app/Contents/Info.plist</span>
+CFBundleIdentifier           →  <span class="str">com.airspace.desktop</span>     ✅
+CFBundleName                 →  <span class="str">AirSpace</span>                 ✅
+NSBonjourServices            →  <span class="str">_airspace._tcp</span>           ✅
+NSLocalNetworkUsageDescription → <span class="str">"AirSpace requires local network..."</span>  ✅</pre>
+
+    <h2>Output Files</h2>
+    <table>
+      <tr><th>File</th><th>Path</th><th>Purpose</th></tr>
+      <tr><td><strong>AirSpace.app</strong></td><td><code>release/mac-arm64/AirSpace.app</code></td><td>Runnable app — double-click to launch</td></tr>
+      <tr><td><strong>AirSpace-1.0.0-arm64.dmg</strong></td><td><code>release/</code></td><td>Drag-to-Applications installer</td></tr>
+      <tr><td><strong>AirSpace-1.0.0-arm64.zip</strong></td><td><code>release/</code></td><td>ZIP archive for sharing</td></tr>
+      <tr><td><strong>dist/assets/index-*.js</strong></td><td><code>dist/assets/</code></td><td>Bundled React app (522 KB)</td></tr>
+      <tr><td><strong>dist/assets/index-*.css</strong></td><td><code>dist/assets/</code></td><td>All styles (90 KB)</td></tr>
+    </table>
+  </section>
+
+
+  <!-- 9. VERIFICATION -->
+  <section>
+    <div class="section-header">
+      <div class="section-icon icon-blue">🔍</div>
+      <div>
+        <div class="section-title">§9 — How to Verify It Works</div>
+        <div class="section-number">Step-by-step testing protocol</div>
+      </div>
+    </div>
+
+    <ul class="checklist">
+      <li>
+        <span class="check">①</span>
+        <div><strong>Launch the app</strong><br>
+        <code>open /Users/suyesh/Desktop/Airspace/release/mac-arm64/AirSpace.app</code><br>
+        macOS should show a <strong>fresh Local Network permission prompt</strong> for "AirSpace". Accept it.</div>
+      </li>
+      <li>
+        <span class="check">②</span>
+        <div><strong>Check System Settings</strong><br>
+        Go to System Settings → Privacy &amp; Security → Local Network.<br>
+        You should see <strong>"AirSpace"</strong> in the list (not NearDrop).</div>
+      </li>
+      <li>
+        <span class="check">③</span>
+        <div><strong>Verify Bonjour advertising (Receiver Mode)</strong><br>
+        Enable Receiver mode in the app, then run in Terminal:<br>
+        <code>dns-sd -B _airspace._tcp local</code><br>
+        Should show your device advertising as <code>_airspace._tcp</code>.</div>
+      </li>
+      <li>
+        <span class="check">④</span>
+        <div><strong>Two-device test</strong><br>
+        Run AirSpace on two Macs on the same WiFi network. One in Receiver mode, one in Sender/Discovery mode. The sender should discover the receiver on the LAN.</div>
+      </li>
+      <li>
+        <span class="check">⑤</span>
+        <div><strong>Confirm old identity is gone</strong><br>
+        The old <code>com.neardrop.app</code> entry should no longer appear in the Local Network permission list after a fresh macOS restart.</div>
+      </li>
+    </ul>
+  </section>
+
+
+  <!-- 10. FOR YOUR AI -->
+  <section>
+    <div class="section-header">
+      <div class="section-icon icon-pink">🤖</div>
+      <div>
+        <div class="section-title">§10 — How to Continue Working (Instructions for an AI)</div>
+        <div class="section-number">Give this section to your next AI assistant to get it fully up to speed</div>
+      </div>
+    </div>
+
+    <div class="instruction-box">
+      <h3>📌 Context for AI — Copy & Paste This</h3>
+      <p style="color: var(--text); line-height: 1.9; font-size: 12.5px;">
+        You are working on <strong>AirSpace</strong>, a macOS Electron + React app for local file sharing over LAN.<br><br>
+        <strong>Project root:</strong> <code>/Users/suyesh/Desktop/Airspace/</code><br>
+        <strong>Old source (read-only reference):</strong> <code>/Users/suyesh/Desktop/OrbitalShare/</code><br><br>
+        The app was migrated from OrbitalShare (bundle ID <code>com.neardrop.app</code>) to a fresh identity (<code>com.airspace.desktop</code>) because the old ID was blacklisted by macOS local network security.<br><br>
+        <strong>Stack:</strong> Electron 42.4.0 · React 19 · Vite 8 · TypeScript · TailwindCSS v4 · Framer Motion · Zustand · dnssd (native C++) · WebSocket (ws)<br><br>
+        <strong>Key rules:</strong><br>
+        • IPC channels are ALL prefixed <code>orbitalshare:</code> — DO NOT change these<br>
+        • Network service type is <code>_airspace._tcp</code> (in main.cjs constant <code>BONJOUR_SERVICE_TYPE</code>)<br>
+        • Discovery uses native <code>dnssd</code> library (NOT Electron's built-in Bonjour)<br>
+        • <code>service.fullname</code> is aliased to <code>fqdn</code> in the <code>serviceUp</code> callback — preserve this<br>
+        • The app has two modes: <strong>Sender</strong> (Discovery page, browses LAN) and <strong>Receiver</strong> (Waiting page, advertises on LAN)<br>
+        • Local WebSocket relay runs on port 8080 via <code>server/server.js</code> (imported dynamically by main.cjs)
+      </p>
+    </div>
+
+    <h2>Key Files to Edit for Common Tasks</h2>
+    <table>
+      <tr><th>Task</th><th>File to Edit</th></tr>
+      <tr><td>Change Bonjour service type or app name</td><td><code>electron/main.cjs</code> — top constants block</td></tr>
+      <tr><td>Add new IPC channel</td><td><code>electron/main.cjs</code> + <code>electron/preload.cjs</code> + <code>src/lib/electron.ts</code></td></tr>
+      <tr><td>Modify UI pages</td><td><code>src/pages/</code> — each page in its own folder</td></tr>
+      <tr><td>Modify discovery animation</td><td><code>src/components/discovery/</code></td></tr>
+      <tr><td>Change transfer logic</td><td><code>src/lib/transfer*.ts</code> + <code>server/transferHandlers.js</code></td></tr>
+      <tr><td>Change app icon</td><td>Replace <code>src/assets/logo/neardrop-app-icon-1024.png</code> + <code>build/icon.icns</code></td></tr>
+      <tr><td>Change global styles</td><td><code>src/index.css</code> (800+ lines, comprehensive)</td></tr>
+      <tr><td>Add new npm package</td><td><code>npm install &lt;pkg&gt;</code> from <code>/Users/suyesh/Desktop/Airspace/</code></td></tr>
+      <tr><td>Repackage after changes</td><td><code>npm run build &amp;&amp; npx electron-builder --mac</code></td></tr>
+      <tr><td>Run in dev mode</td><td><code>npm run dev</code> + <code>npm run electron</code> in separate terminals</td></tr>
+    </table>
+
+    <h2>Architecture Overview</h2>
+    <pre><span class="cm">Renderer Process (React/Vite)
+  └── src/pages/         ← Route pages (Home, Discovery, SelectFiles, Transfer, Waiting)
+  └── src/components/    ← UI components
+  └── src/store/         ← Zustand state (transferStore, trustInboxStore)
+  └── src/lib/           ← Business logic (transfer protocol, session, validation)
+  └── src/services/      ← Discovery + WebSocket client services
+       │
+       │  window.orbitalShareDesktop (exposed by preload.cjs)
+       ↕  IPC channels: orbitalshare:*
+       │
+Main Process (Node.js / Electron)
+  └── electron/main.cjs  ← App lifecycle, dnssd, tray, notifications, IPC handlers
+  └── electron/preload.cjs ← Context bridge (IPC bridge to renderer)
+  └── server/server.js    ← Local WebSocket relay on port 8080 (file transfer)</span></pre>
+  </section>
+
+</div><!-- /container -->
+
+<!-- PRINT BUTTON -->
+<button class="print-btn no-print" onclick="window.print()">
+  🖨️ Save as PDF
+</button>
+
+</body>
+</html>
