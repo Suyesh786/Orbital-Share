@@ -784,7 +784,7 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
     }
   },
 
-  discoverReceivers: () => {
+  discoverReceivers: async () => {
     if (isElectron()) return
 
     const state = get()
@@ -795,7 +795,7 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
       console.log("[WS] discoverReceivers()")
     }
 
-    const sent = websocketService.sendDiscoverReceivers()
+    const sent = await websocketService.sendDiscoverReceivers()
     if (sent) {
       set({ lastWsEvent: "discover_receivers" })
     }
@@ -1194,7 +1194,7 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
     })
   },
 
-  notifyTransferComplete: () => {
+  notifyTransferComplete: async () => {
     const { activeTransferId, wsConnectionStatus, transferSessionStatus, mode } =
       get()
     if (mode !== "receiver") return
@@ -1210,7 +1210,7 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
     const sessionToken = get().activeTransferSessionToken
     if (!sessionToken) return
 
-    const sent = websocketService.sendTransferComplete({
+    const sent = await websocketService.sendTransferComplete({
       transferId: activeTransferId,
       sessionToken,
     })
@@ -1634,7 +1634,7 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
       perFileProgressOrder,
     })
 
-    const metadataSent = websocketService.sendTransferMetadata({
+    const metadataSent = await websocketService.sendTransferMetadata({
       transferId: state.activeTransferId,
       sessionToken: state.activeTransferSessionToken,
       files: toMetadataEntries(outgoing),
@@ -2117,7 +2117,7 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
     }
   },
 
-  registerDevice: () => {
+  registerDevice: async () => {
     const state = get()
     if (!state.onboardingCompleted || !state.username || !state.deviceId) {
       console.log("[REGISTER] registerDevice() skipped — identity not ready")
@@ -2143,7 +2143,7 @@ export const useTransferStore = create<TransferStoreState>((set, get) => ({
       socketId: state.wsSocketId.slice(0, 8),
     })
 
-    const sent = websocketService.sendRegisterMessage({
+    const sent = await websocketService.sendRegisterMessage({
       username: state.username,
       deviceId: state.deviceId,
       mode: registrationMode,

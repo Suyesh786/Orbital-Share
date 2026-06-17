@@ -47,7 +47,7 @@
 
     "macOSPrivateApi": true,
     "security": {
-      "csp": null
+      "csp": "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: tauri:; connect-src 'self' tauri: http://localhost:* ws://localhost:* ws://127.0.0.1:* ws://192.168.* ws://10.* ws://172.* ws://*;"
     }
   },
   "bundle": {

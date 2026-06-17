@@ -71,7 +71,7 @@ export async function streamOutgoingFiles(
         chunkData
       )
 
-      const sent = websocketService.sendBinary(packet)
+      const sent = await websocketService.sendBinary(packet)
       if (!sent) return "failed"
 
       bytesSent += chunkData.byteLength

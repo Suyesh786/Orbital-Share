@@ -20,6 +20,7 @@ import {
   selectTransferState,
   useTransferStore,
 } from "@/store/useTransferStore"
+import { getDesktopApi } from "@/lib/electron"
 import type { NearbyDevice } from "@/types/device"
 
 export function DiscoveryPage() {
@@ -65,6 +66,21 @@ export function DiscoveryPage() {
     if (!activeTransferId && !completionSummary) return
     navigate("/transfer", { replace: true })
   }, [mode, activeTransferId, completionSummary, navigate])
+
+  useEffect(() => {
+    // Re-fetch the current known receiver list from the Rust backend on every mount.
+    // This is SEPARATE from startDiscovery() — it only re-populates the list from
+    // the backend's current mDNS cache. It does NOT reset any transfer state.
+    // Needed because the backend only emits "lan-receivers" events on state changes,
+    // so navigating away and back would leave the list empty if no mDNS event fired.
+    if (mode !== "sender") return
+    const desktopApi = getDesktopApi()
+    if (!desktopApi) return
+    void desktopApi.getLanReceivers().then((receivers) => {
+      useTransferStore.getState().applyLanReceiverServices(receivers)
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // Empty dep array: run once on mount only
 
   useEffect(() => {
     const onTrustChanged = () => {

@@ -20,3 +20,6 @@ src-tauri/target/
 # Log files
 *.log
 npm-debug.log
+release/
+*.dmg
+*.zip

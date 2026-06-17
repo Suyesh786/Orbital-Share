@@ -1,3 +1,4 @@
+import TauriWebSocket from '@tauri-apps/plugin-websocket'
 import {
   guardInboundJsonSize,
   parseServerNoticeMessage,
@@ -68,7 +69,8 @@ const RECONNECT_BASE_MS = 1000
 const RECONNECT_MAX_MS = 15000
 
 class WebSocketService {
-  private socket: WebSocket | null = null
+  private socket: TauriWebSocket | null = null
+  private connectionStatus: WebSocketConnectionStatus = "offline"
   private handlers: WebSocketHandlers = {}
   private statusListeners = new Set<WebSocketStatusListener>()
   private reconnectAttempt = 0
@@ -76,17 +78,10 @@ class WebSocketService {
   private intentionalClose = false
   private lastSocketId = ""
   private connectWaiters = new Set<(connected: boolean) => void>()
+  private removeMessageListener: (() => void) | null = null
 
   getStatus(): WebSocketConnectionStatus {
-    if (!this.socket) return "offline"
-    switch (this.socket.readyState) {
-      case WebSocket.CONNECTING:
-        return "connecting"
-      case WebSocket.OPEN:
-        return "connected"
-      default:
-        return "offline"
-    }
+    return this.connectionStatus
   }
 
   getLastSocketId(): string {
@@ -106,6 +101,7 @@ class WebSocketService {
   }
 
   private notifyStatus(status: WebSocketConnectionStatus) {
+    this.connectionStatus = status
     for (const listener of this.statusListeners) {
       listener(status)
     }
@@ -287,8 +283,7 @@ class WebSocketService {
     this.clearReconnectTimer()
 
     if (this.socket) {
-      this.socket.onclose = null
-      this.socket.close()
+      await this.socket.disconnect().catch(() => {})
       this.socket = null
     }
 
@@ -314,92 +309,98 @@ class WebSocketService {
     })
   }
 
-  private openSocket() {
-    if (
-      this.socket &&
-      (this.socket.readyState === WebSocket.OPEN ||
-        this.socket.readyState === WebSocket.CONNECTING)
-    ) {
+  private async openSocket() {
+    if (this.socket || this.connectionStatus === "connecting" || this.connectionStatus === "connected") {
       return
     }
 
     this.notifyStatus("connecting")
 
     try {
-      this.socket = new WebSocket(currentWsUrl)
-    } catch (error) {
-      console.error("[WS] Failed to create socket:", error)
-      this.notifyStatus("offline")
-      this.resolveConnectWaiters(false)
-      this.scheduleReconnect()
-      return
-    }
-
-    this.socket.onopen = () => {
+      this.socket = await TauriWebSocket.connect(currentWsUrl)
+      
       this.reconnectAttempt = 0
       console.log("[WS] Connected")
       this.notifyStatus("connected")
       this.resolveConnectWaiters(true)
       this.handlers.onOpen?.()
-    }
 
-    this.socket.onclose = () => {
-      console.log("[WS] Disconnected")
-      this.socket = null
+      this.removeMessageListener = this.socket.addListener((msg) => {
+        if (msg.type === "Text") {
+          this.routeInboundMessage(msg.data)
+        } else if (msg.type === "Binary") {
+          const buffer = new Uint8Array(msg.data as number[]).buffer
+          void this.routeBinaryMessage(buffer)
+        } else if (msg.type === "Close") {
+          console.log("[WS] Disconnected (Close Message)")
+          this.handleDisconnect()
+        }
+      })
+    } catch (error) {
+      console.error("[WS] Failed to create socket:", error)
+      this.handleDisconnect()
+    }
+  }
+
+  private handleDisconnect() {
+    if (this.removeMessageListener) {
+      this.removeMessageListener()
+      this.removeMessageListener = null
+    }
+    this.socket = null
+    if (this.connectionStatus !== "offline") {
       this.notifyStatus("offline")
       this.resolveConnectWaiters(false)
       this.handlers.onClose?.()
       this.scheduleReconnect()
     }
-
-    this.socket.onerror = (event) => {
-      console.error("[WS] Error", event)
-      if (this.getStatus() !== "connected") {
-        this.resolveConnectWaiters(false)
-      }
-      this.handlers.onError?.(event)
-    }
-
-    this.socket.onmessage = (event) => {
-      const data = event.data
-      if (data instanceof ArrayBuffer) {
-        void this.routeBinaryMessage(data)
-        return
-      }
-      if (data instanceof Blob) {
-        void data.arrayBuffer().then((buffer) => this.routeBinaryMessage(buffer))
-        return
-      }
-      this.routeInboundMessage(data)
-    }
   }
 
-  disconnect() {
+  async disconnect() {
     this.intentionalClose = true
     this.clearReconnectTimer()
     this.handlers = {}
     this.lastSocketId = ""
 
     if (this.socket) {
-      this.socket.onclose = null
-      this.socket.close()
-      this.socket = null
+      try {
+        await this.socket.disconnect()
+      } catch (e) {
+        console.warn("[WS] Error during disconnect", e)
+      }
     }
-
+    
+    if (this.removeMessageListener) {
+      this.removeMessageListener()
+      this.removeMessageListener = null
+    }
+    this.socket = null
     this.notifyStatus("offline")
   }
 
-  send(payload: string | ArrayBuffer | Blob) {
-    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+  async send(payload: string | ArrayBuffer | Blob): Promise<boolean> {
+    if (!this.socket || this.connectionStatus !== "connected") {
       console.warn("[WS] Cannot send — socket not open")
       return false
     }
 
-    this.socket.send(payload)
-    return true
+    try {
+      if (typeof payload === "string") {
+        await this.socket.send(payload)
+      } else if (payload instanceof Blob) {
+        const buffer = await payload.arrayBuffer()
+        await this.socket.send(new Uint8Array(buffer) as unknown as number[])
+      } else if (payload instanceof ArrayBuffer) {
+        await this.socket.send(new Uint8Array(payload) as unknown as number[])
+      }
+      return true
+    } catch (error) {
+      console.error("[WS] Send error:", error)
+      return false
+    }
   }
 
-  sendRegisterMessage(payload: RegisterPayload) {
+  async sendRegisterMessage(payload: RegisterPayload) {
     return this.send(
       JSON.stringify({
         type: "register",
@@ -408,39 +409,39 @@ class WebSocketService {
     )
   }
 
-  sendDiscoverReceivers() {
+  async sendDiscoverReceivers() {
     return this.send(JSON.stringify({ type: "discover_receivers" }))
   }
 
-  sendTransferRequest(payload: TransferRequestOutboundPayload) {
+  async sendTransferRequest(payload: TransferRequestOutboundPayload) {
     return this.send(JSON.stringify({ type: "transfer_request", payload }))
   }
 
-  sendTransferAccept(payload: TransferAcceptPayload) {
+  async sendTransferAccept(payload: TransferAcceptPayload) {
     return this.send(JSON.stringify({ type: "transfer_accept", payload }))
   }
 
-  sendTransferReject(payload: TransferRejectPayload) {
+  async sendTransferReject(payload: TransferRejectPayload) {
     return this.send(JSON.stringify({ type: "transfer_reject", payload }))
   }
 
-  sendTransferCancel(payload: TransferCancelPayload) {
+  async sendTransferCancel(payload: TransferCancelPayload) {
     return this.send(JSON.stringify({ type: "transfer_cancel", payload }))
   }
 
-  sendTransferAbort(payload: TransferAbortPayload) {
+  async sendTransferAbort(payload: TransferAbortPayload) {
     return this.send(JSON.stringify({ type: "transfer_abort", payload }))
   }
 
-  sendTransferMetadata(payload: TransferMetadataPayload) {
+  async sendTransferMetadata(payload: TransferMetadataPayload) {
     return this.send(JSON.stringify({ type: "transfer_metadata", payload }))
   }
 
-  sendTransferComplete(payload: TransferCompleteOutboundPayload) {
+  async sendTransferComplete(payload: TransferCompleteOutboundPayload) {
     return this.send(JSON.stringify({ type: "transfer_complete", payload }))
   }
 
-  sendBinary(payload: ArrayBuffer) {
+  async sendBinary(payload: ArrayBuffer) {
     return this.send(payload)
   }
 

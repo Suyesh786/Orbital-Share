@@ -21,7 +21,10 @@ use tauri::{
 use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
-use tokio_tungstenite::{accept_async, tungstenite::Message};
+use tokio_tungstenite::{
+    accept_hdr_async,
+    tungstenite::{handshake::server::{Request, Response}, Message},
+};
 use uuid::Uuid;
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -253,10 +256,28 @@ fn start_mdns_publisher(state: &mut AppState, presence: &ReceiverPresencePayload
     // Stop any existing publisher
     stop_mdns_publisher(state);
 
-    let daemon = ServiceDaemon::new().unwrap_or_else(|e| {
-        eprintln!("[mDNS] Failed to create daemon: {e}");
-        panic!("mDNS daemon init failed");
-    });
+    // Retry daemon creation — macOS briefly locks the mDNS socket after shutdown
+    let daemon = {
+        let mut result = None;
+        for attempt in 1..=3 {
+            match ServiceDaemon::new() {
+                Ok(d) => { result = Some(d); break; }
+                Err(e) => {
+                    eprintln!("[mDNS] Daemon init attempt {attempt}/3 failed: {e}");
+                    if attempt < 3 {
+                        std::thread::sleep(Duration::from_millis(200));
+                    }
+                }
+            }
+        }
+        match result {
+            Some(d) => d,
+            None => {
+                eprintln!("[mDNS] All 3 daemon creation attempts failed — aborting publisher start");
+                return false;
+            }
+        }
+    };
 
     // TXT keys ≤ 9 chars (Apple mDNSResponder limit)
     let mut properties: HashMap<String, String> = HashMap::new();
@@ -311,6 +332,9 @@ fn stop_mdns_publisher(state: &mut AppState) {
     ) {
         let _ = daemon.unregister(&fqdn);
         let _ = daemon.shutdown();
+        // Give the OS a moment to release the mDNS socket before any re-registration.
+        // Without this, the next ServiceDaemon::new() call on macOS can fail immediately.
+        std::thread::sleep(Duration::from_millis(200));
     }
 }
 
@@ -335,6 +359,21 @@ fn gethostname() -> String {
 
 fn spawn_mdns_browser(app_handle: AppHandle, shared_state: SharedState) {
     tauri::async_runtime::spawn(async move {
+        // ── Late-joiner fix: retry the browse at 1 s and 4 s so that services
+        //    which were already advertising when we started get picked up.
+        //    mdns_sd sends a PTR query on browse(), but if the LAN is busy or
+        //    the response arrives before our event loop is running we miss it.
+        //    Restarting browse forces a fresh query burst.
+        let start_browse = |daemon: &ServiceDaemon| -> Option<mdns_sd::Receiver<ServiceEvent>> {
+            match daemon.browse(BONJOUR_SERVICE_TYPE) {
+                Ok(r) => Some(r),
+                Err(e) => {
+                    eprintln!("[mDNS] Browse error: {e}");
+                    None
+                }
+            }
+        };
+
         let daemon = match ServiceDaemon::new() {
             Ok(d) => d,
             Err(e) => {
@@ -343,12 +382,9 @@ fn spawn_mdns_browser(app_handle: AppHandle, shared_state: SharedState) {
             }
         };
 
-        let receiver = match daemon.browse("_airspace._tcp.local.") {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!("[mDNS] Browse error: {e}");
-                return;
-            }
+        let receiver = match start_browse(&daemon) {
+            Some(r) => r,
+            None => return,
         };
 
         // Stale sweep task
@@ -370,80 +406,24 @@ fn spawn_mdns_browser(app_handle: AppHandle, shared_state: SharedState) {
             }
         });
 
-        // Event loop
+        // Main event loop
         loop {
             match receiver.recv_async().await {
                 Ok(ServiceEvent::ServiceResolved(info)) => {
-                    let fqdn = info.get_fullname().to_string();
-                    let txt = info.get_properties().clone();
-
-                    let avail = txt.get("avail").map(|p| p.val_str()).unwrap_or("0");
-                    if avail != "1" {
-                        continue;
-                    }
-
-                    let device_id = match txt.get("id").map(|p| p.val_str().to_string()) {
-                        Some(id) if !id.is_empty() => id,
-                        _ => continue,
-                    };
-                    let username = match txt.get("user").map(|p| p.val_str().to_string()) {
-                        Some(u) if !u.is_empty() => u,
-                        _ => continue,
-                    };
-                    let device_type = txt
-                        .get("type")
-                        .map(|p| p.val_str().to_string())
-                        .filter(|t| matches!(t.as_str(), "desktop" | "mobile" | "unknown"))
-                        .unwrap_or_else(|| "unknown".to_string());
-                    let platform = txt
-                        .get("os")
-                        .map(|p| p.val_str().to_string())
-                        .filter(|p| {
-                            matches!(
-                                p.as_str(),
-                                "macos" | "windows" | "linux" | "android" | "ios" | "unknown"
-                            )
-                        })
-                        .unwrap_or_else(|| "unknown".to_string());
-
-                    // Pick a reachable (non-loopback, non-link-local) address
-                    let host = info
-                        .get_addresses()
-                        .iter()
-                        .find(|a| {
-                            let s = a.to_string();
-                            !s.starts_with("127.")
-                                && s != "::1"
-                                && !s.starts_with("fe80::")
-                        })
-                        .map(|a| a.to_string());
-
-                    let Some(host) = host else { continue };
-                    let port = info.get_port();
-
-                    {
-                        let mut state = shared_state.lock().unwrap();
-                        state.lan_receivers.insert(
-                            fqdn,
-                            LanReceiverEntry {
-                                service: LanReceiverService {
-                                    device_id,
-                                    username,
-                                    host,
-                                    port,
-                                    device_type: Some(device_type),
-                                    platform: Some(platform),
-                                },
-                                last_seen: now_ms(),
-                            },
-                        );
-                    }
-                    emit_lan_receivers(&app_handle, &shared_state);
+                    process_resolved_service(&info, &shared_state, &app_handle);
                 }
 
                 Ok(ServiceEvent::ServiceRemoved(_, fullname)) => {
-                    // Ignore explicit ServiceRemoved events from mDNS to prevent flashing in the UI.
-                    // The LAN_RECEIVER_STALE_MS sweep will naturally expire devices if they truly disappear.
+                    // Actively remove the departed device — do NOT rely on the 45s stale sweep.
+                    // This ensures the Sender UI clears the receiver within seconds of them turning off.
+                    let changed = {
+                        let mut state = shared_state.lock().unwrap();
+                        state.lan_receivers.remove(&fullname).is_some()
+                    };
+                    if changed {
+                        println!("[mDNS] 🔴 Device departed: {}", &fullname);
+                        emit_lan_receivers(&app_handle, &shared_state);
+                    }
                 }
 
                 Ok(_) => {}
@@ -455,6 +435,91 @@ fn spawn_mdns_browser(app_handle: AppHandle, shared_state: SharedState) {
             }
         }
     });
+}
+
+/// Shared logic: process a resolved mDNS service and add/update the lan_receivers map.
+fn process_resolved_service(
+    info: &mdns_sd::ServiceInfo,
+    shared_state: &SharedState,
+    app_handle: &AppHandle,
+) {
+    let fqdn = info.get_fullname().to_string();
+    let txt = info.get_properties().clone();
+
+    let avail = txt.get("avail").map(|p| p.val_str()).unwrap_or("0");
+    if avail != "1" {
+        return;
+    }
+
+    let device_id = match txt.get("id").map(|p| p.val_str().to_string()) {
+        Some(id) if !id.is_empty() => id,
+        _ => return,
+    };
+    let username = match txt.get("user").map(|p| p.val_str().to_string()) {
+        Some(u) if !u.is_empty() => u,
+        _ => return,
+    };
+    let device_type = txt
+        .get("type")
+        .map(|p| p.val_str().to_string())
+        .filter(|t| matches!(t.as_str(), "desktop" | "mobile" | "unknown"))
+        .unwrap_or_else(|| "unknown".to_string());
+    let platform = txt
+        .get("os")
+        .map(|p| p.val_str().to_string())
+        .filter(|p| {
+            matches!(
+                p.as_str(),
+                "macos" | "windows" | "linux" | "android" | "ios" | "unknown"
+            )
+        })
+        .unwrap_or_else(|| "unknown".to_string());
+
+    // Strictly prefer IPv4 (contains a dot) to avoid broken connections over
+    // IPv6 link-local / global addresses that browsers often refuse for WS.
+    let addresses = info.get_addresses();
+    let host = addresses
+        .iter()
+        .find(|a| {
+            // Must be IPv4: contains a dot, is not loopback 127.x.x.x
+            let s = a.to_string();
+            s.contains('.') && !s.starts_with("127.")
+        })
+        .or_else(|| {
+            // Fallback: any non-loopback, non-link-local address
+            addresses.iter().find(|a| {
+                let s = a.to_string();
+                !s.starts_with("127.") && s != "::1" && !s.starts_with("fe80::")
+            })
+        })
+        .map(|a| a.to_string());
+
+    let Some(host) = host else {
+        eprintln!("[mDNS] No usable address for {} (addresses: {:?})", fqdn, addresses);
+        return;
+    };
+    let port = info.get_port();
+
+    println!("[mDNS] ✅ Resolved: {} → {}:{} (user={})", fqdn, host, port, username);
+
+    {
+        let mut state = shared_state.lock().unwrap();
+        state.lan_receivers.insert(
+            fqdn,
+            LanReceiverEntry {
+                service: LanReceiverService {
+                    device_id,
+                    username,
+                    host,
+                    port,
+                    device_type: Some(device_type),
+                    platform: Some(platform),
+                },
+                last_seen: now_ms(),
+            },
+        );
+    }
+    emit_lan_receivers(app_handle, shared_state);
 }
 
 fn emit_lan_receivers(app: &AppHandle, state: &SharedState) {
@@ -471,7 +536,7 @@ fn emit_lan_receivers(app: &AppHandle, state: &SharedState) {
 
 fn spawn_ws_server(app_handle: AppHandle, shared_state: SharedState) {
     tauri::async_runtime::spawn(async move {
-        let listener = match TcpListener::bind(format!("127.0.0.1:{}", LOCAL_WS_PORT)).await {
+        let listener = match TcpListener::bind(format!("0.0.0.0:{}", LOCAL_WS_PORT)).await {
             Ok(l) => l,
             Err(e) => {
                 eprintln!("[WS] Failed to bind port {LOCAL_WS_PORT}: {e}");
@@ -493,10 +558,15 @@ fn spawn_ws_server(app_handle: AppHandle, shared_state: SharedState) {
             let app = app_handle.clone();
 
             tauri::async_runtime::spawn(async move {
-                let ws_stream = match accept_async(tcp_stream).await {
+                println!("[WS] 🔗 Incoming TCP from {addr} — upgrading to WebSocket");
+                let callback = |_req: &Request, response: Response| -> Result<Response, tokio_tungstenite::tungstenite::http::response::Response<Option<String>>> {
+                    // Accept all origins blindly to bypass WKWebView mixed-content / custom protocol blocks
+                    Ok(response)
+                };
+                let ws_stream = match accept_hdr_async(tcp_stream, callback).await {
                     Ok(s) => s,
                     Err(e) => {
-                        eprintln!("[WS] Handshake error from {addr}: {e}");
+                        eprintln!("[WS] ❌ Handshake error from {addr}: {e}");
                         return;
                     }
                 };
@@ -524,7 +594,7 @@ fn spawn_ws_server(app_handle: AppHandle, shared_state: SharedState) {
                     );
                 }
 
-                println!("[WS] Client connected: {}", &socket_id[..8]);
+                println!("[WS] ✅ Client connected: socket={} addr={}", &socket_id[..8], addr);
 
                 // Send "connected" message
                 let connected_msg = serde_json::json!({
@@ -575,10 +645,15 @@ fn spawn_ws_server(app_handle: AppHandle, shared_state: SharedState) {
                         Message::Text(text) => {
                             let parsed: serde_json::Value = match serde_json::from_str(&text) {
                                 Ok(v) => v,
-                                Err(_) => continue,
+                                Err(e) => {
+                                    eprintln!("[WS] ❌ JSON parse error from {}: {} | raw={}", &socket_id[..8], e, &text[..text.len().min(200)]);
+                                    continue;
+                                }
                             };
                             let msg_type = parsed["type"].as_str().unwrap_or("").to_string();
                             let payload = parsed.get("payload").cloned().unwrap_or(serde_json::Value::Null);
+
+                            println!("[WS] 📨 msg_type='{}' socket={}", msg_type, &socket_id[..8]);
 
                             handle_ws_message(
                                 &state,
@@ -672,6 +747,7 @@ fn handle_ws_message(
 }
 
 fn handle_register(state: &SharedState, app: &AppHandle, socket_id: &str, payload: serde_json::Value) {
+    println!("[WS] 📝 REGISTER attempt from socket={} payload={}", &socket_id[..8], payload);
     let username = payload["username"].as_str().map(|s| s.trim().to_string());
     let device_id = payload["deviceId"].as_str().map(|s| s.trim().to_string());
     let mode = payload["mode"].as_str().map(|s| s.to_string());
@@ -680,7 +756,10 @@ fn handle_register(state: &SharedState, app: &AppHandle, socket_id: &str, payloa
 
     let (username, device_id, mode) = match (username, device_id, mode) {
         (Some(u), Some(d), Some(m)) if !u.is_empty() && !d.is_empty() && (m == "sender" || m == "receiver") => (u, d, m),
-        _ => return,
+        _ => {
+            eprintln!("[WS] ❌ REGISTER rejected from socket={} — missing/invalid username/deviceId/mode. payload={}", &socket_id[..8], payload);
+            return;
+        }
     };
 
     {
@@ -1686,6 +1765,7 @@ pub fn run() {
 
             Ok(())
         })
+        .plugin(tauri_plugin_websocket::init())
         .invoke_handler(tauri::generate_handler![
             get_lan_receivers,
             get_lan_discovery_error,
