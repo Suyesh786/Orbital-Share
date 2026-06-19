@@ -3,7 +3,6 @@ import { motion, AnimatePresence } from "framer-motion"
 import { Download, File } from "lucide-react"
 import { OverallTransferProgress } from "@/components/transfer/OverallTransferProgress"
 import { PerFileTransferProgressList } from "@/components/transfer/PerFileTransferProgressList"
-import { ReceivedFileSelectionList } from "@/components/transfer/ReceivedFileSelectionList"
 import { TransferCompleteHeader } from "@/components/transfer/TransferCompleteHeader"
 import { TransferFinalizingOverlay } from "@/components/transfer/TransferFinalizingOverlay"
 import { useNavigate } from "react-router-dom"
@@ -17,17 +16,12 @@ import {
   selectActiveTransferTotalBytes,
   selectBytesTransferred,
   selectCompletionSummary,
-  selectDownloadSelectedReceivedFiles,
   selectEstimatedTimeRemaining,
   selectPerFileProgressOrder,
   selectPerFileTransferProgress,
-  selectReceivedFilesMemory,
   selectReceivedFilesSavedToDownloads,
   selectReceivedFilesSaveDirectory,
   selectReceivedFilesSaveError,
-  selectSelectedCompletedFileIds,
-  selectToggleCompletedFileSelection,
-  selectReceivedFileCount,
   selectExitTransferToDiscovery,
   selectHasActiveTransferSession,
   selectHasCompletionSummary,
@@ -114,10 +108,6 @@ export function TransferPage() {
   const hasActiveSession = useTransferStore(selectHasActiveTransferSession)
   const transferSessionStatus = useTransferStore(selectTransferSessionStatus)
   const resetTransferFlow = useTransferStore(selectResetTransferFlow)
-  const downloadSelectedReceivedFiles = useTransferStore(
-    selectDownloadSelectedReceivedFiles
-  )
-  const receivedFilesMemory = useTransferStore(selectReceivedFilesMemory)
   const receivedFilesSavedToDownloads = useTransferStore(
     selectReceivedFilesSavedToDownloads
   )
@@ -125,13 +115,8 @@ export function TransferPage() {
     selectReceivedFilesSaveDirectory
   )
   const receivedFilesSaveError = useTransferStore(selectReceivedFilesSaveError)
-  const selectedCompletedFileIds = useTransferStore(selectSelectedCompletedFileIds)
-  const toggleCompletedFileSelection = useTransferStore(
-    selectToggleCompletedFileSelection
-  )
   const perFileProgressOrder = useTransferStore(selectPerFileProgressOrder)
   const perFileTransferProgress = useTransferStore(selectPerFileTransferProgress)
-  const receivedFileCount = useTransferStore(selectReceivedFileCount)
   const startOutgoingFileTransfer = useTransferStore(selectStartOutgoingFileTransfer)
   const transferState = useTransferStore(selectTransferState)
   const progress = useTransferStore(selectTransferProgress)
@@ -233,35 +218,6 @@ export function TransferPage() {
   const summaryFileNames = completionSummary?.fileNames ?? []
   const summaryPeerUsername = completionSummary?.peerUsername
 
-  const receivedFilesList = useMemo(
-    () => Object.values(receivedFilesMemory),
-    [receivedFilesMemory]
-  )
-
-  const selectedDownloadCount = useMemo(
-    () =>
-      Object.entries(selectedCompletedFileIds).filter(([, selected]) => selected)
-        .length,
-    [selectedCompletedFileIds]
-  )
-
-  const downloadButtonLabel = useMemo(() => {
-    if (selectedDownloadCount === 0) {
-      return "Select files to download"
-    }
-    if (selectedDownloadCount === 1) {
-      return "Download Selected File"
-    }
-    return `Download Selected Files (${selectedDownloadCount})`
-  }, [selectedDownloadCount])
-
-  const handleDownloadSelected = () => {
-    if (selectedDownloadCount === 0) return
-    downloadSelectedReceivedFiles()
-  }
-
-  const canDownloadReceived =
-    summaryMode === "receiver" && receivedFileCount > 0
   const autoSavedToDownloads =
     summaryMode === "receiver" &&
     receivedFilesSavedToDownloads &&
@@ -370,17 +326,6 @@ export function TransferPage() {
 
             {summaryMode === "receiver" &&
               !autoSavedToDownloads &&
-              receivedFilesList.length > 0 && (
-              <ReceivedFileSelectionList
-                files={receivedFilesList}
-                selectedByFileId={selectedCompletedFileIds}
-                onToggle={toggleCompletedFileSelection}
-              />
-            )}
-
-            {summaryMode === "receiver" &&
-              !autoSavedToDownloads &&
-              receivedFilesList.length === 0 &&
               summaryFileNames.length > 0 && (
                 <ul className="mt-6 max-h-48 w-full space-y-2 overflow-y-auto text-left">
                   {summaryFileNames.map((fileName, index) => {
@@ -436,26 +381,12 @@ export function TransferPage() {
                 ) : (
                 <>
                   <GlowButton
-                    disabled={!canDownloadReceived || selectedDownloadCount === 0}
-                    className={cn(
-                      "w-full transition-opacity duration-300",
-                      selectedDownloadCount === 0 && "opacity-50"
-                    )}
-                    onClick={handleDownloadSelected}
+                    disabled={true}
+                    className="w-full transition-opacity duration-300 opacity-50"
                   >
                     <span className="flex items-center justify-center gap-2">
                       <Download className="size-4" />
-                      <AnimatePresence mode="wait" initial={false}>
-                        <motion.span
-                          key={downloadButtonLabel}
-                          initial={{ opacity: 0, y: 4 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: -4 }}
-                          transition={{ duration: 0.18 }}
-                        >
-                          {downloadButtonLabel}
-                        </motion.span>
-                      </AnimatePresence>
+                      <span>Saved to Downloads</span>
                     </span>
                   </GlowButton>
                   <button

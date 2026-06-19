@@ -172,6 +172,7 @@ struct PendingRequest {
     request_id: String,
     requester_socket_id: String,
     sender_username: String,
+    sender_device_id: String,
     files: Vec<serde_json::Value>,
     created_at: u64,
     accepting: bool,
@@ -197,6 +198,9 @@ struct AppState {
     sessions_by_socket: HashMap<String, String>,         // socketId → transferId
     pending_by_receiver: HashMap<String, PendingRequest>, // receiverSocketId → pending
     pending_by_requester: HashMap<String, String>,         // requesterSocketId → receiverSocketId
+
+    // Direct-to-disk streaming
+    active_downloads: HashMap<String, std::path::PathBuf>,
 }
 
 type SharedState = Arc<Mutex<AppState>>;
@@ -343,7 +347,33 @@ fn local_ip_address() -> Option<String> {
     let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
     socket.connect("8.8.8.8:80").ok()?;
     let addr = socket.local_addr().ok()?;
-    Some(addr.ip().to_string())
+    let ip = addr.ip().to_string();
+
+    // Filter out known virtual bridge / VPN subnets that are not routable on the
+    // physical LAN.  If the OS routes us through one of these, fall back to None
+    // so the mDNS publisher skips advertisement rather than advertising a dead IP.
+    let virtual_prefixes = [
+        "172.17.",  // Docker default bridge
+        "172.18.",  // Docker user networks
+        "172.19.",
+        "172.20.",
+        "10.211.", // Parallels
+        "10.37.",  // Parallels NAT
+        "10.212.",
+        "192.168.56.",  // VirtualBox host-only
+        "192.168.59.",  // Docker Machine
+        "100.64.",      // CGNAT / Tailscale
+    ];
+
+    for prefix in &virtual_prefixes {
+        if ip.starts_with(prefix) {
+            eprintln!("[NET] ⚠️  local_ip_address resolved to virtual subnet {ip} — filtering out");
+            return None;
+        }
+    }
+
+    println!("[NET] ✅ local_ip_address resolved to: {ip}");
+    Some(ip)
 }
 
 fn gethostname() -> String {
@@ -632,7 +662,10 @@ fn spawn_ws_server(app_handle: AppHandle, shared_state: SharedState) {
                 while let Some(msg_result) = ws_source.next().await {
                     let msg = match msg_result {
                         Ok(m) => m,
-                        Err(_) => break,
+                        Err(e) => {
+                            eprintln!("[WS] ❌ Read error from {}: {:?}", &socket_id[..8], e);
+                            break;
+                        }
                     };
 
                     match msg {
@@ -913,6 +946,7 @@ fn handle_transfer_request(state: &SharedState, app: &AppHandle, requester_id: &
                 request_id: request_id.clone(),
                 requester_socket_id: requester_id.to_string(),
                 sender_username: sender_username.clone(),
+                sender_device_id: sender_device_id.clone(),
                 files: files.clone(),
                 created_at: now,
                 accepting: false,
@@ -1008,12 +1042,15 @@ fn handle_transfer_accept(state: &SharedState, receiver_id: &str, payload: serde
     let transfer_id = Uuid::new_v4().to_string();
     let session_token = Uuid::new_v4().to_string();
 
-    let (sender_username, receiver_username) = {
+    let (sender_username, receiver_username, receiver_device_id) = {
         let s = state.lock().unwrap();
         let receiver_name = s.ws_clients.get(receiver_id)
             .and_then(|c| c.username.clone())
             .unwrap_or_else(|| "Receiver".to_string());
-        (pending.sender_username.clone(), receiver_name)
+        let receiver_device_id = s.ws_clients.get(receiver_id)
+            .and_then(|c| c.device_id.clone())
+            .unwrap_or_default();
+        (pending.sender_username.clone(), receiver_name, receiver_device_id)
     };
 
     {
@@ -1044,6 +1081,8 @@ fn handle_transfer_accept(state: &SharedState, receiver_id: &str, payload: serde
         s.pending_by_requester.remove(&requester_id);
     }
 
+    let total_bytes: u64 = pending.files.iter().filter_map(|f| f["size"].as_u64()).sum();
+
     let accepted_payload = serde_json::json!({
         "transferId": transfer_id,
         "sessionToken": session_token,
@@ -1051,6 +1090,11 @@ fn handle_transfer_accept(state: &SharedState, receiver_id: &str, payload: serde
         "receiverSocketId": receiver_id,
         "senderUsername": sender_username,
         "receiverUsername": receiver_username,
+        "senderDeviceId": pending.sender_device_id,
+        "receiverDeviceId": receiver_device_id,
+        "files": pending.files,
+        "totalBytes": total_bytes,
+        "status": "connecting",
     });
 
     ws_send(state, &requester_id, serde_json::json!({ "type": "transfer_request_accepted", "payload": accepted_payload }));
@@ -1432,7 +1476,12 @@ fn set_lan_discovery_active(
     let mut s = state.lock().unwrap();
     s.lan_discovery_active = active;
     if !active {
-        s.lan_receivers.clear();
+        // Do NOT clear s.lan_receivers here — the mDNS browser task keeps running
+        // in the background regardless of this flag, and clearing the cache means
+        // the next "active=true" sees an empty list until the peer's mDNS service
+        // happens to re-announce (can take minutes). Only emit a transient empty
+        // list so the UI can hide stale entries while inactive; keep the real
+        // cache warm so re-activating shows known devices immediately.
         drop(s);
         let _ = app.emit("lan-receivers", Vec::<LanReceiverService>::new());
     }
@@ -1493,23 +1542,55 @@ fn show_transfer_completed_notification(
 }
 
 #[tauri::command]
-async fn save_received_files_to_downloads(files: Vec<FileSavePayload>) -> Result<FileSaveResult, String> {
+async fn init_file_download(state: tauri::State<'_, SharedState>, file_id: String, file_name: String) -> Result<String, String> {
     let downloads_dir = dirs::download_dir().ok_or("Cannot find Downloads directory")?;
-    let mut saved_count = 0;
+    let base_path = downloads_dir.join(&file_name);
+    let target_path = get_unique_download_path(&base_path);
+    
+    tokio::fs::File::create(&target_path)
+        .await
+        .map_err(|e| format!("Failed to create file: {e}"))?;
+        
+    let mut s = state.lock().unwrap();
+    s.active_downloads.insert(file_id, target_path.clone());
+    
+    Ok(target_path.to_string_lossy().into_owned())
+}
 
-    for file in &files {
-        let base_path = downloads_dir.join(&file.name);
-        let target_path = get_unique_download_path(&base_path);
-        tokio::fs::write(&target_path, &file.bytes)
-            .await
-            .map_err(|e| format!("Write error: {e}"))?;
-        saved_count += 1;
-    }
+#[tauri::command]
+async fn append_file_chunk(state: tauri::State<'_, SharedState>, file_id: String, chunk: Vec<u8>) -> Result<(), String> {
+    let path = {
+        let s = state.lock().unwrap();
+        s.active_downloads.get(&file_id).cloned()
+    };
+    let path = path.ok_or("File download not initialized or already finalized")?;
+    
+    use tokio::io::AsyncWriteExt;
+    let mut file = tokio::fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .await
+        .map_err(|e| format!("Failed to open file for appending: {e}"))?;
+        
+    file.write_all(&chunk)
+        .await
+        .map_err(|e| format!("Failed to write chunk: {e}"))?;
+        
+    file.flush()
+        .await
+        .map_err(|e| format!("Failed to flush file: {e}"))?;
+        
+    Ok(())
+}
 
-    Ok(FileSaveResult {
-        saved_count,
-        directory: Some(downloads_dir.to_string_lossy().into_owned()),
-    })
+#[tauri::command]
+async fn finalize_file_download(state: tauri::State<'_, SharedState>, file_id: String) -> Result<String, String> {
+    let path = {
+        let mut s = state.lock().unwrap();
+        s.active_downloads.remove(&file_id)
+    };
+    let path = path.ok_or("File not found in active downloads")?;
+    Ok(path.to_string_lossy().into_owned())
 }
 
 fn get_unique_download_path(base: &std::path::Path) -> std::path::PathBuf {
@@ -1778,7 +1859,9 @@ pub fn run() {
             show_incoming_transfer_notification,
             show_transfer_progress_notification,
             show_transfer_completed_notification,
-            save_received_files_to_downloads,
+            init_file_download,
+            append_file_chunk,
+            finalize_file_download,
         ])
         .build(tauri::generate_context!())
         .expect("error while building AirSpace")

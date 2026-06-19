@@ -28,6 +28,7 @@
     "core:tray:allow-set-menu",
     "core:tray:allow-set-visible",
     "core:app:allow-name",
-    "core:app:allow-version"
+    "core:app:allow-version",
+    "websocket:default"
   ]
 }

@@ -336,8 +336,15 @@ class WebSocketService {
           this.handleDisconnect()
         }
       })
-    } catch (error) {
-      console.error("[WS] Failed to create socket:", error)
+    } catch (error: unknown) {
+      const errStr = error instanceof Error ? error.message : String(error)
+      const errObj = typeof error === "object" && error !== null ? JSON.stringify(error) : ""
+      console.error(
+        `[WS] PLUGIN WS ERROR — connect("${currentWsUrl}") failed:\n` +
+        `  message: ${errStr}\n` +
+        `  raw: ${errObj}\n` +
+        `  type: ${typeof error}`
+      )
       this.handleDisconnect()
     }
   }
@@ -389,9 +396,9 @@ class WebSocketService {
         await this.socket.send(payload)
       } else if (payload instanceof Blob) {
         const buffer = await payload.arrayBuffer()
-        await this.socket.send(new Uint8Array(buffer) as unknown as number[])
+        await this.socket.send(Array.from(new Uint8Array(buffer)))
       } else if (payload instanceof ArrayBuffer) {
-        await this.socket.send(new Uint8Array(payload) as unknown as number[])
+        await this.socket.send(Array.from(new Uint8Array(payload)))
       }
       return true
     } catch (error) {
