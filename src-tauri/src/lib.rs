@@ -1870,7 +1870,7 @@ pub fn run() {
             match event {
                 // Fired on macOS when the user clicks the Dock icon while all
                 // windows are hidden. Re-show the main window so the app is
-                // never "stuck" in the background.
+                // never "stuck" in the background and better.
                 tauri::RunEvent::Reopen { has_visible_windows, .. } => {
                     if !has_visible_windows {
                         println!("[Dock] Reopen event -> showing main window");
